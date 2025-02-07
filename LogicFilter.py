@@ -14,48 +14,19 @@ OLLAMA_MODELS = {
 
 # Progress messages
 PROGRESS_MESSAGES = {
-    "start": (
-        "Starting multi-model prompt improvement process...\n"
-        "This process uses multiple specialized models in sequence:\n"
-        "- llama3.2:latest for deep analysis\n"
-        "- olmo2:13b for creative solutions\n"
-        "- deepseek-r1 for vetting\n"
-        "- deepseek-r1:14b for initial improvements\n"
-        "- phi4:latest for enhancement\n"
-        "- phi4:latest (128k context) for final review\n\n"
-    ),
-    "analyzing": (
-        "🔍 Phase 1/6: Initial Analysis (llama3.2:latest)\n"
-        "Analyzing prompt structure, requirements, and potential...\n"
-    ),
-    "analysis_done": ("✓ Analysis complete! Handing off to solution generation...\n\n"),
-    "generating": (
-        "🤔 Phase 2/6: Solution Generation (olmo2:13b)\n"
-        "Creating improvements based on analysis...\n"
-    ),
-    "generation_done": ("✓ Solutions generated! Handing off to vetting phase...\n\n"),
-    "vetting": (
-        "🔎 Phase 3/6: Solution Vetting (deepseek-r1)\n"
-        "Evaluating and validating proposed improvements...\n"
-    ),
-    "vetting_done": ("✓ Vetting complete! Handing off to finalization...\n\n"),
-    "finalizing": (
-        "📝 Phase 4/6: Initial Finalization (deepseek-r1:14b)\n"
-        "Creating improved version with validated changes...\n"
-    ),
-    "finalize_done": ("✓ Initial version complete! Handing off to enhancement...\n\n"),
-    "enhancing": (
-        "✨ Phase 5/6: Advanced Enhancement (phi4:latest)\n"
-        "Polishing and refining the improved prompt...\n"
-    ),
-    "enhance_done": ("✓ Enhancement complete! Starting final review...\n\n"),
-    "comprehensive": (
-        "🔄 Phase 6/6: Comprehensive Review (phi4:latest)\n"
-        "Using 128k context window to review entire process...\n"
-    ),
-    "complete": (
-        "✓ Process complete!\n" "Final version combines insights from all phases.\n\n"
-    ),
+    "start": "Processing prompt...\n",
+    "analyzing": "Phase 1/6: Analysis\n",
+    "analysis_done": "Analysis complete.\n\n",
+    "generating": "Phase 2/6: Generation\n",
+    "generation_done": "Generation complete.\n\n",
+    "vetting": "Phase 3/6: Vetting\n",
+    "vetting_done": "Vetting complete.\n\n",
+    "finalizing": "Phase 4/6: Finalization\n",
+    "finalize_done": "Finalization complete.\n\n",
+    "enhancing": "Phase 5/6: Enhancement\n",
+    "enhance_done": "Enhancement complete.\n\n",
+    "comprehensive": "Phase 6/6: Review\n",
+    "complete": "Process complete.\n\n",
 }
 
 
@@ -233,6 +204,27 @@ def comprehensive_review(
         return None
 
 
+def create_model_indicators(parent):
+    """Creates a frame with model status indicators."""
+    frame = tk.Frame(parent, bg="#f0f0f0")
+    frame.pack(fill=tk.X, pady=(0, 10))
+
+    indicators = {}
+    for model_type in OLLAMA_MODELS:
+        label = tk.Label(
+            frame,
+            text=f"● {model_type}",
+            font=("Arial", 9),
+            fg="#666666",
+            bg="#f0f0f0",
+            padx=5,
+        )
+        label.pack(side=tk.LEFT)
+        indicators[model_type] = label
+
+    return indicators
+
+
 def create_scrolled_text(parent, height=10, width=50, readonly=False):
     """Helper function to create a Text widget with a scrollbar."""
     frame = tk.Frame(parent)
@@ -270,6 +262,19 @@ def main():
     main_frame = tk.Frame(root, bg="#f0f0f0", padx=20, pady=20)
     main_frame.pack(fill=tk.BOTH, expand=True)
 
+    # Create model status indicators
+    model_indicators = create_model_indicators(main_frame)
+
+    # Reset all indicators to inactive
+    def reset_indicators():
+        for label in model_indicators.values():
+            label.config(fg="#666666")
+
+    # Set an indicator as active
+    def set_active_model(model_type):
+        reset_indicators()
+        model_indicators[model_type].config(fg="#4a90e2")
+
     input_label = tk.Label(
         main_frame, text="Enter your prompt:", font=("Arial", 12, "bold"), bg="#f0f0f0"
     )
@@ -299,58 +304,56 @@ def main():
     def process_prompt():
         initial_prompt = input_text.get("1.0", tk.END).strip()
         if not initial_prompt:
-            update_output("⚠️ Error: No prompt entered.")
+            update_output("Error: No prompt entered.")
             return
 
         output = progress_msgs["start"]
         update_output(output)
 
         # Phase 1: Analysis
+        set_active_model("analysis")
         output += progress_msgs["analyzing"]
         update_output(output)
 
         analysis_report = analyze_prompt(initial_prompt, OLLAMA_MODELS["analysis"])
         if not analysis_report:
-            update_output(output + "❌ Error: Analysis failed.")
+            update_output(output + "Error: Analysis failed.")
             return
 
         output += progress_msgs["analysis_done"]
-        output += "🔍 Analysis Report:\n"
-        output += "─" * 40 + "\n"
         output += analysis_report + "\n\n"
         update_output(output)
 
         # Phase 2: Solution Generation
+        set_active_model("generation")
         output += progress_msgs["generating"]
         update_output(output)
 
         solutions = generate_solutions(analysis_report, OLLAMA_MODELS["generation"])
         if not solutions:
-            update_output(output + "❌ Error: Generation failed.")
+            update_output(output + "Error: Generation failed.")
             return
 
         output += progress_msgs["generation_done"]
-        output += "💡 Solutions:\n"
-        output += "─" * 40 + "\n"
         output += solutions + "\n\n"
         update_output(output)
 
         # Phase 3: Vetting
+        set_active_model("vetting")
         output += progress_msgs["vetting"]
         update_output(output)
 
         vetting_report = vet_and_refine(solutions, OLLAMA_MODELS["vetting"])
         if not vetting_report:
-            update_output(output + "❌ Error: Vetting failed.")
+            update_output(output + "Error: Vetting failed.")
             return
 
         output += progress_msgs["vetting_done"]
-        output += "🔎 Vetting Report:\n"
-        output += "─" * 40 + "\n"
         output += vetting_report + "\n\n"
         update_output(output)
 
         # Phase 4: Initial Finalization
+        set_active_model("finalization")
         output += progress_msgs["finalizing"]
         update_output(output)
 
@@ -358,31 +361,29 @@ def main():
             vetting_report, initial_prompt, OLLAMA_MODELS["finalization"]
         )
         if not final_result:
-            update_output(output + "❌ Error: Finalization failed.")
+            update_output(output + "Error: Finalization failed.")
             return
 
         output += progress_msgs["finalize_done"]
-        output += "📝 Initial Prompt:\n"
-        output += "─" * 40 + "\n"
         output += final_result + "\n\n"
         update_output(output)
 
         # Phase 5: Enhancement
+        set_active_model("enhancement")
         output += progress_msgs["enhancing"]
         update_output(output)
 
         enhanced_result = enhance_prompt(final_result, OLLAMA_MODELS["enhancement"])
         if not enhanced_result:
-            update_output(output + "❌ Error: Enhancement failed.")
+            update_output(output + "Error: Enhancement failed.")
             return
 
         output += progress_msgs["enhance_done"]
-        output += "✨ Enhanced Prompt:\n"
-        output += "─" * 40 + "\n"
         output += enhanced_result + "\n\n"
         update_output(output)
 
         # Phase 6: Comprehensive Review
+        set_active_model("comprehensive")
         output += progress_msgs["comprehensive"]
         update_output(output)
 
@@ -396,12 +397,10 @@ def main():
             OLLAMA_MODELS["comprehensive"],
         )
         if not comprehensive_result:
-            update_output(output + "❌ Error: Comprehensive review failed.")
+            update_output(output + "Error: Review failed.")
             return
 
         output += progress_msgs["complete"]
-        output += "🌟 Ultimate Super Prompt:\n"
-        output += "═" * 40 + "\n"
         output += comprehensive_result + "\n"
         update_output(output)
 
