@@ -148,7 +148,7 @@ def enhance_prompt(final_prompt, model_name):
                     f"{final_prompt}\n\n"
                     "Focus on:\n"
                     "1. Making instructions crystal clear\n"
-                    "2. Adding any missing details\n"
+                    "2. Adding any missing details, try to find at least 10\n"
                     "3. Improving structure\n"
                     "4. Ensuring completeness\n"
                     "5. Maintaining focus\n\n"
