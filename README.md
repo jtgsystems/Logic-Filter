@@ -6,10 +6,11 @@ multi-model approach.
 ## Features
 
 - Interactive GUI interface with input and output areas
-- Three-phase prompt processing:
-  1. Analysis (using llama3.2:latest)
-  2. Solution Generation (using olmo2:13b)
-  3. Refinement and Improvement (using phi4:latest)
+- Four-phase prompt processing:
+  1. Analysis (using `llama3.2:latest`)
+  2. Solution Generation (using `olmo2:13b`)
+  3. Vetting and Screening (using `deepseek-r1`)
+  4. Final Prompt Creation (using `deepseek-r1:14b`)
 - Real-time progress updates
 - Detailed output for each processing phase
 
@@ -25,13 +26,14 @@ multi-model approach.
 
 ## Setup
 
-1. Ensure Ollama is installed and running
+1. Ensure Ollama is installed and running.
 2. Pull the required models:
 
    ```
    ollama pull llama3.2:latest
    ollama pull olmo2:13b
-   ollama pull phi4:latest
+   ollama pull deepseek-r1
+   ollama pull deepseek-r1:14b
    ```
 
 3. Install the Python dependencies:
@@ -48,36 +50,53 @@ multi-model approach.
    python LogicFilter.py
    ```
 
-2. Enter your prompt in the input text box
-3. Click "Process & Improve Prompt"
+2. Enter your prompt in the input text box.
+3. Click "Process & Improve Prompt".
 4. The application will:
-   - Analyze your prompt for potential issues
-   - Generate alternative approaches
-   - Refine and improve the final version
+   - Analyze your prompt for potential issues.
+   - Generate alternative approaches.
+   - Vet and screen the generated solutions.
+   - Create a final, improved "super prompt" based on the vetting report and
+     incorporating best practices for prompt engineering.
 5. View the results in the output area, including:
    - Initial analysis
    - Generated alternatives
+   - Vetting report
    - Final improved version
 
 ## How It Works
 
-The application uses three specialized models in sequence:
+The application uses a four-phase process with specialized models:
 
-1. **Analysis Phase (llama3.2:latest)**
+1. **Analysis Phase (`llama3.2:latest`)**
 
-   - Breaks down the prompt
-   - Identifies potential issues
-   - Analyzes structure and components
+   - Breaks down the prompt.
+   - Identifies potential issues, assumptions, and ambiguities.
+   - Analyzes structure and components.
 
-2. **Generation Phase (olmo2:13b)**
+2. **Generation Phase (`olmo2:13b`)**
 
-   - Creates multiple alternative versions
-   - Explores different approaches
-   - Generates creative solutions
+   - Creates multiple alternative versions of the prompt.
+   - Explores different approaches and phrasings.
+   - Generates creative solutions.
 
-3. **Refinement Phase (phi4:latest)**
-   - Evaluates all versions
-   - Identifies and fixes issues
-   - Produces the final improved prompt
+3. **Vetting Phase (`deepseek-r1`)**
+
+   - Evaluates all generated solutions.
+   - Identifies and reports on weaknesses, inconsistencies, and missing
+     elements.
+   - Suggests specific areas for expansion and enhancement.
+
+4. **Finalization Phase (`deepseek-r1:14b`)**
+   - Takes the original prompt and the vetting report.
+   - Creates a final, improved, and expanded "super prompt".
+   - Addresses all identified issues and incorporates expansion opportunities.
+   - Follows best practices for prompt engineering, including:
+     - Clear, precise instructions at the beginning.
+     - Specific details about context, outcome, length, format, and style.
+     - Use of appropriate leading words or phrases.
+     - Avoiding vague or imprecise language.
+     - Providing positive guidance ("what to do" instead of just "what not to
+       do").
 
 Progress is shown in real-time with clear indicators for each phase.
