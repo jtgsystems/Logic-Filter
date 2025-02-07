@@ -9,7 +9,8 @@ OLLAMA_MODELS = {
     "vetting": "deepseek-r1",  # Initial vetting
     "finalization": "deepseek-r1:14b",  # First round improvement
     "enhancement": "phi4:latest",  # Advanced enhancement
-    "comprehensive": "phi4:latest",  # Final comprehensive review (128k context)
+    "comprehensive": "phi4:latest",  # Initial comprehensive review
+    "presenter": "deepseek-r1:14b",  # Final presentation cleanup
 }
 
 # Progress messages
@@ -173,31 +174,52 @@ def comprehensive_review(
     enhanced_prompt,
     model_name,
 ):
-    """Uses phi4's 128k context window to create the ultimate version."""
+    """Creates final version and ensures clean presentation."""
     try:
+        # First, use phi4 for comprehensive review
         messages = [
             {
                 "role": "user",
                 "content": (
-                    "Review the prompt improvement process and create the "
-                    "final version:\n\n"
+                    "Review all versions of this prompt and create an improved "
+                    "version that combines the best elements:\n\n"
                     f"Original: {original_prompt}\n"
                     f"Analysis: {analysis_report}\n"
                     f"Solutions: {solutions}\n"
                     f"Vetting: {vetting_report}\n"
                     f"Final: {final_prompt}\n"
                     f"Enhanced: {enhanced_prompt}\n\n"
-                    "Create the ultimate version by:\n"
-                    "1. Taking the best elements from each version\n"
-                    "2. Ensuring perfect clarity and structure\n"
-                    "3. Maintaining complete focus on the task\n"
-                    "4. Adding any final polish needed\n\n"
-                    "Important: Return ONLY the final version. Stay focused "
-                    "on the original task. No examples or tangents."
+                    "Create a refined version that maintains the core intent "
+                    "while maximizing clarity and effectiveness."
                 ),
             }
         ]
         response = ollama.chat(model=model_name, messages=messages)
+        improved = response["message"]["content"]
+
+        # Then use deepseek-r1:14b as final presenter
+        messages = [
+            {
+                "role": "user",
+                "content": (
+                    "You are the final presenter. Review this prompt and ensure "
+                    "it's presented in the cleanest possible format:\n\n"
+                    f"{improved}\n\n"
+                    "Requirements:\n"
+                    "1. Remove any markdown formatting (**, #, etc)\n"
+                    "2. Remove any meta-commentary or notes\n"
+                    "3. Remove any section headers or labels\n"
+                    "4. Present as clean, flowing paragraphs\n"
+                    "5. Maintain all important content\n\n"
+                    "First, identify 25 potential formatting or presentation "
+                    "issues, then fix them all. Finally, present the result "
+                    "in the cleanest possible format.\n\n"
+                    "Start your response with 'PRESENT TO USER:' followed by "
+                    "the final, clean prompt."
+                ),
+            }
+        ]
+        response = ollama.chat(model=OLLAMA_MODELS["presenter"], messages=messages)
         return response["message"]["content"]
     except Exception as e:
         print(f"Error during comprehensive review: {e}")
@@ -400,8 +422,18 @@ def main():
             update_output(output + "Error: Review failed.")
             return
 
+        # Final presentation cleanup
+        set_active_model("presenter")
+        output += "Cleaning up final presentation...\n"
+        update_output(output)
+
+        # Present final result
         output += progress_msgs["complete"]
-        output += comprehensive_result + "\n"
+        if "PRESENT TO USER:" in comprehensive_result:
+            final_text = comprehensive_result.split("PRESENT TO USER:", 1)[1].strip()
+            output += final_text + "\n"
+        else:
+            output += comprehensive_result + "\n"
         update_output(output)
 
     process_button = tk.Button(
