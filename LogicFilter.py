@@ -58,24 +58,6 @@ def analyze_prompt(prompt, model_name):
         return None
 
 
-def generate_solutions(analysis_report, model_name):
-    """Generates focused improvements based on the analysis."""
-    try:
-        messages = [
-            {
-                "role": "user",
-                "content": (
-                    f"Based on this analysis: '{analysis_report}'\n\n"
-                    "Generate specific improvements that address the identified "
-                    "needs and requirements. Focus on:\n"
-                    "1. Adding missing components\n"
-                    "2. Clarifying unclear parts\n"
-                    "3. Strengthening weak areas\n"
-                    "4. Enhancing structure and flow\n\n"
-                    "Important: Stay focused on improving the original prompt. "
-                    "Do not create new, unrelated prompts or go off-topic."
-                ),
-            }
         ]
         response = ollama.chat(model=model_name, messages=messages)
         return response["message"]["content"]
