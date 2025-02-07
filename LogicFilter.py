@@ -58,6 +58,25 @@ def analyze_prompt(prompt, model_name):
         return None
 
 
+def generate_solutions(analysis, model_name):
+    """Generates potential improvements based on analysis."""
+    try:
+        messages = [
+            {
+                "role": "user",
+                "content": (
+                    f"Based on this analysis: '{analysis}'\n\n"
+                    "Generate specific improvements that:\n"
+                    "1. Address identified issues\n"
+                    "2. Enhance clarity and specificity\n"
+                    "3. Add necessary structure\n"
+                    "4. Maintain focus on core goals\n"
+                    "5. Consider all quality criteria\n\n"
+                    "Important: Generate practical, focused improvements "
+                    "that directly enhance the prompt. Avoid theoretical "
+                    "discussions or tangents."
+                ),
+            }
         ]
         response = ollama.chat(model=model_name, messages=messages)
         return response["message"]["content"]
@@ -73,15 +92,17 @@ def vet_and_refine(improvements, model_name):
             {
                 "role": "user",
                 "content": (
-                    f"Review these suggested improvements: '{improvements}'\n\n"
+                    "Review these suggested improvements: "
+                    f"'{improvements}'\n\n"
                     "Evaluate how well they enhance the original prompt:\n"
                     "1. Do they address core requirements?\n"
                     "2. Are they clear and specific?\n"
                     "3. Do they maintain focus on the task?\n"
                     "4. Are they practical and implementable?\n\n"
-                    "Important: Focus on validating improvements that directly "
-                    "enhance the original prompt. Flag any suggestions that go "
-                    "off-topic or deviate from the main goal."
+                    "Important: Focus on validating improvements that "
+                    "directly enhance the original prompt. Flag any "
+                    "suggestions that go off-topic or deviate from the "
+                    "main goal."
                 ),
             }
         ]
@@ -163,16 +184,16 @@ def comprehensive_review(
             {
                 "role": "user",
                 "content": (
-                    "Review all versions of this prompt and create an improved "
-                    "version that combines the best elements:\n\n"
+                    "Review all versions of this prompt and create an "
+                    "improved version that combines the best elements:\n\n"
                     f"Original: {original_prompt}\n"
                     f"Analysis: {analysis_report}\n"
                     f"Solutions: {solutions}\n"
                     f"Vetting: {vetting_report}\n"
                     f"Final: {final_prompt}\n"
                     f"Enhanced: {enhanced_prompt}\n\n"
-                    "Create a refined version that maintains the core intent "
-                    "while maximizing clarity and effectiveness."
+                    "Create a refined version that maintains the core "
+                    "intent while maximizing clarity and effectiveness."
                 ),
             }
         ]
@@ -184,20 +205,20 @@ def comprehensive_review(
             {
                 "role": "user",
                 "content": (
-                    "You are the final presenter. Review this prompt and ensure "
-                    "it's presented in the cleanest possible format:\n\n"
-                    f"{improved}\n\n"
+                    "You are the final presenter. Review this prompt and "
+                    "ensure it's presented in the cleanest possible "
+                    f"format:\n\n{improved}\n\n"
                     "Requirements:\n"
                     "1. Remove any markdown formatting (**, #, etc)\n"
                     "2. Remove any meta-commentary or notes\n"
                     "3. Remove any section headers or labels\n"
                     "4. Present as clean, flowing paragraphs\n"
                     "5. Maintain all important content\n\n"
-                    "First, identify 25 potential formatting or presentation "
-                    "issues, then fix them all. Finally, present the result "
-                    "in the cleanest possible format.\n\n"
-                    "Start your response with 'PRESENT TO USER:' followed by "
-                    "the final, clean prompt."
+                    "First, identify 25 potential formatting or "
+                    "presentation issues, then fix them all. Finally, "
+                    "present the result in the cleanest possible format.\n\n"
+                    "Start your response with 'PRESENT TO USER:' followed "
+                    "by the final, clean prompt."
                 ),
             }
         ]
@@ -280,20 +301,33 @@ def main():
         model_indicators[model_type].config(fg="#4a90e2")
 
     input_label = tk.Label(
-        main_frame, text="Enter your prompt:", font=("Arial", 12, "bold"), bg="#f0f0f0"
+        main_frame,
+        text="Enter your prompt:",
+        font=("Arial", 12, "bold"),
+        bg="#f0f0f0",
     )
     input_label.pack(anchor=tk.W)
 
-    input_frame, input_text = create_scrolled_text(main_frame, height=5, width=60)
+    input_frame, input_text = create_scrolled_text(
+        main_frame,
+        height=5,
+        width=60,
+    )
     input_frame.pack(fill=tk.X, pady=(5, 15))
 
     output_label = tk.Label(
-        main_frame, text="Results:", font=("Arial", 12, "bold"), bg="#f0f0f0"
+        main_frame,
+        text="Results:",
+        font=("Arial", 12, "bold"),
+        bg="#f0f0f0",
     )
     output_label.pack(anchor=tk.W)
 
     output_frame, output_text = create_scrolled_text(
-        main_frame, height=20, width=60, readonly=True
+        main_frame,
+        height=20,
+        width=60,
+        readonly=True,
     )
     output_frame.pack(fill=tk.BOTH, expand=True, pady=(5, 15))
 
@@ -319,7 +353,10 @@ def main():
         output += progress_msgs["analyzing"]
         update_output(output)
 
-        analysis_report = analyze_prompt(initial_prompt, OLLAMA_MODELS["analysis"])
+        analysis_report = analyze_prompt(
+            initial_prompt,
+            OLLAMA_MODELS["analysis"],
+        )
         if not analysis_report:
             update_output(output + "Error: Analysis failed.")
             return
@@ -333,7 +370,10 @@ def main():
         output += progress_msgs["generating"]
         update_output(output)
 
-        solutions = generate_solutions(analysis_report, OLLAMA_MODELS["generation"])
+        solutions = generate_solutions(
+            analysis_report,
+            OLLAMA_MODELS["generation"],
+        )
         if not solutions:
             update_output(output + "Error: Generation failed.")
             return
@@ -347,7 +387,10 @@ def main():
         output += progress_msgs["vetting"]
         update_output(output)
 
-        vetting_report = vet_and_refine(solutions, OLLAMA_MODELS["vetting"])
+        vetting_report = vet_and_refine(
+            solutions,
+            OLLAMA_MODELS["vetting"],
+        )
         if not vetting_report:
             update_output(output + "Error: Vetting failed.")
             return
@@ -362,7 +405,9 @@ def main():
         update_output(output)
 
         final_result = finalize_prompt(
-            vetting_report, initial_prompt, OLLAMA_MODELS["finalization"]
+            vetting_report,
+            initial_prompt,
+            OLLAMA_MODELS["finalization"],
         )
         if not final_result:
             update_output(output + "Error: Finalization failed.")
@@ -377,7 +422,10 @@ def main():
         output += progress_msgs["enhancing"]
         update_output(output)
 
-        enhanced_result = enhance_prompt(final_result, OLLAMA_MODELS["enhancement"])
+        enhanced_result = enhance_prompt(
+            final_result,
+            OLLAMA_MODELS["enhancement"],
+        )
         if not enhanced_result:
             update_output(output + "Error: Enhancement failed.")
             return
@@ -412,7 +460,10 @@ def main():
         # Present final result
         output += progress_msgs["complete"]
         if "PRESENT TO USER:" in comprehensive_result:
-            final_text = comprehensive_result.split("PRESENT TO USER:", 1)[1].strip()
+            final_text = comprehensive_result.split(
+                "PRESENT TO USER:",
+                1,
+            )[1].strip()
             output += final_text + "\n"
         else:
             output += comprehensive_result + "\n"
