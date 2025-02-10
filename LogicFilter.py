@@ -85,17 +85,20 @@ if not os.path.exists(assets_dir):
 os.environ["CUSTOMTKINTER_IMAGES_PATH"] = assets_dir
 
 class OllamaServiceManager:
+    """Manages Ollama service and model availability"""
     def __init__(self, app_state):
         self.app_state = app_state
         self.ollama_ready = False
         self.models_loaded = False
         self.ollama_module = None
+        self.check_interval = 30000  # 30 seconds between checks
+        self._last_check = 0
         self._start_service_check()
         
     def _start_service_check(self):
         """Start periodic service checking"""
         if self.app_state.root:
-            self.app_state.root.after(1000, self.check_service_status)
+            self._check_service_status()
         
     def check_ollama_service(self):
         """Check if Ollama service is running and accessible."""
@@ -129,15 +132,20 @@ class OllamaServiceManager:
             return False
 
     def check_service_status(self):
-        """Periodically check Ollama service status"""
-        if not self.ollama_ready:
-            if self.initialize_ollama():
-                if self.app_state.status_bar:
-                    self.app_state.status_bar.set_status("Ollama connected")
+        """Check Ollama service status periodically"""
+        current_time = time.time() * 1000  # Convert to milliseconds
+        
+        # Only check if enough time has passed since last check
+        if current_time - self._last_check >= self.check_interval:
+            self._last_check = current_time
+            if not self.ollama_ready:
+                if self.initialize_ollama():
+                    if self.app_state.status_bar:
+                        self.app_state.status_bar.set_status("Ollama connected")
             
         # Schedule next check only if not ready
         if not self.ollama_ready and self.app_state.root:
-            self.app_state.root.after(5000, self.check_service_status)
+            self.app_state.root.after(self.check_interval, self.check_service_status)
 
     def chat(self, *args, **kwargs):
         """Wrapper for ollama.chat that ensures service is initialized"""
@@ -145,6 +153,21 @@ class OllamaServiceManager:
             if not self.initialize_ollama():
                 raise OllamaError("Ollama service not ready")
         return self.ollama_module.chat(*args, **kwargs)
+        
+    def verify_model(self, model_name):
+        """Verify if a specific model is available"""
+        try:
+            if not self.ollama_ready:
+                return False
+                
+            response = self.chat(
+                model=model_name, 
+                messages=[{"role": "user", "content": "test"}],
+                options={"timeout": 5000}
+            )
+            return True
+        except Exception as e:
+            return False
 
 # Create OllamaError class before it's used
 class OllamaError(Exception):
