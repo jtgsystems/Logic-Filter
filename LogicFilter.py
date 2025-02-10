@@ -787,6 +787,239 @@ class SettingsDialog:
             command=self.window.destroy
         ).pack(side="bottom", pady=10)
 
+class InputPane(ctk.CTkFrame):
+    """Enhanced input pane with additional features"""
+    def __init__(self, parent, *args, **kwargs):
+        super().__init__(parent, *args, **kwargs)
+        self.setup_ui()
+        
+    def setup_ui(self):
+        # Template selector
+        template_frame = ctk.CTkFrame(self)
+        template_frame.pack(fill="x", pady=(0, 10))
+        
+        ctk.CTkLabel(
+            template_frame,
+            text="Template:",
+            font=("Arial", 12)
+        ).pack(side="left", padx=5)
+        
+        self.template_var = ctk.StringVar(value="None")
+        template_menu = ctk.CTkOptionMenu(
+            template_frame,
+            values=["None", "Analysis", "Story", "Code Review", "Bug Report"],
+            variable=self.template_var,
+            command=self.load_template,
+            width=150
+        )
+        template_menu.pack(side="left", padx=5)
+        
+        # Character counter
+        self.char_count = ctk.CTkLabel(
+            template_frame,
+            text="Characters: 0",
+            font=("Arial", 12)
+        )
+        self.char_count.pack(side="right", padx=10)
+        
+        # Input area with line numbers
+        self.input_frame = ctk.CTkFrame(self)
+        self.input_frame.pack(fill="both", expand=True)
+        
+        self.line_numbers = ctk.CTkTextbox(
+            self.input_frame,
+            width=40,
+            font=("Arial", 12),
+            fg_color="gray20",
+            border_width=0
+        )
+        self.line_numbers.pack(side="left", fill="y")
+        
+        self.text = ctk.CTkTextbox(
+            self.input_frame,
+            font=("Arial", 12),
+            wrap="word"
+        )
+        self.text.pack(side="left", fill="both", expand=True)
+        
+        # Bind events
+        self.text.bind("<<Modified>>", self.on_text_change)
+        self.text.bind("<Key>", self.update_line_numbers)
+        
+    def on_text_change(self, event=None):
+        """Handle text changes"""
+        content = self.text.get("1.0", "end-1c")
+        char_count = len(content)
+        self.char_count.configure(text=f"Characters: {char_count}")
+        self.update_line_numbers()
+        self.text.edit_modified(False)
+        
+    def update_line_numbers(self, event=None):
+        """Update line numbers display"""
+        content = self.text.get("1.0", "end-1c")
+        lines = content.count("\n") + 1
+        line_numbers = "\n".join(str(i) for i in range(1, lines + 1))
+        
+        self.line_numbers.configure(state="normal")
+        self.line_numbers.delete("1.0", "end")
+        self.line_numbers.insert("1.0", line_numbers)
+        self.line_numbers.configure(state="disabled")
+        
+    def load_template(self, template_name):
+        """Load selected template"""
+        templates = {
+            "Analysis": "Please analyze the following:\n\n",
+            "Story": "Write a story about:\n\n",
+            "Code Review": "Please review this code:\n\n",
+            "Bug Report": "Bug Description:\n\nSteps to Reproduce:\n\nExpected Result:\n\nActual Result:\n"
+        }
+        
+        if template_name != "None":
+            self.text.delete("1.0", "end")
+            self.text.insert("1.0", templates.get(template_name, ""))
+
+class OutputPane(ctk.CTkFrame):
+    """Enhanced output pane with additional features"""
+    def __init__(self, parent, *args, **kwargs):
+        super().__init__(parent, *args, **kwargs)
+        self.setup_ui()
+        
+    def setup_ui(self):
+        # Output controls
+        control_frame = ctk.CTkFrame(self)
+        control_frame.pack(fill="x", pady=(0, 10))
+        
+        # Format selector
+        ctk.CTkLabel(
+            control_frame,
+            text="Format:",
+            font=("Arial", 12)
+        ).pack(side="left", padx=5)
+        
+        self.format_var = ctk.StringVar(value="Plain Text")
+        format_menu = ctk.CTkOptionMenu(
+            control_frame,
+            values=["Plain Text", "Markdown", "Code", "JSON"],
+            variable=self.format_var,
+            command=self.format_output,
+            width=120
+        )
+        format_menu.pack(side="left", padx=5)
+        
+        # Word/char count
+        self.count_label = ctk.CTkLabel(
+            control_frame,
+            text="Words: 0 | Characters: 0",
+            font=("Arial", 12)
+        )
+        self.count_label.pack(side="right", padx=10)
+        
+        # Search bar
+        search_frame = ctk.CTkFrame(self)
+        search_frame.pack(fill="x", pady=(0, 10))
+        
+        self.search_entry = ctk.CTkEntry(
+            search_frame,
+            placeholder_text="Search in output...",
+            width=200
+        )
+        self.search_entry.pack(side="left", padx=5)
+        
+        ctk.CTkButton(
+            search_frame,
+            text="Find",
+            width=60,
+            command=self.find_text
+        ).pack(side="left", padx=5)
+        
+        ctk.CTkButton(
+            search_frame,
+            text="Previous",
+            width=80,
+            command=lambda: self.find_text(backwards=True)
+        ).pack(side="left", padx=5)
+        
+        # Output area
+        self.text = ctk.CTkTextbox(
+            self,
+            font=("Arial", 12),
+            wrap="word",
+            state="disabled"
+        )
+        self.text.pack(fill="both", expand=True)
+        
+        # Bind events
+        self.search_entry.bind("<Return>", lambda e: self.find_text())
+        
+    def format_output(self, format_type):
+        """Format the output text based on selected format"""
+        if self.text.get("1.0", "end-1c").strip():
+            content = self.text.get("1.0", "end-1c")
+            self.text.configure(state="normal")
+            self.text.delete("1.0", "end")
+            
+            if format_type == "Code":
+                content = "```\n" + content + "\n```"
+            elif format_type == "JSON":
+                try:
+                    parsed = json.loads(content)
+                    content = json.dumps(parsed, indent=2)
+                except:
+                    pass
+                    
+            self.text.insert("1.0", content)
+            self.text.configure(state="disabled")
+            self.update_counts()
+            
+    def update_counts(self):
+        """Update word and character counts"""
+        content = self.text.get("1.0", "end-1c")
+        words = len(content.split())
+        chars = len(content)
+        self.count_label.configure(
+            text=f"Words: {words} | Characters: {chars}"
+        )
+        
+    def find_text(self, backwards=False):
+        """Search for text in output"""
+        search_text = self.search_entry.get()
+        if not search_text:
+            return
+            
+        content = self.text.get("1.0", "end-1c")
+        current_pos = self.text.index("insert")
+        
+        if backwards:
+            search_pos = self.text.search(
+                search_text,
+                current_pos,
+                backwards=True,
+                stopindex="1.0"
+            )
+        else:
+            search_pos = self.text.search(
+                search_text,
+                current_pos,
+                stopindex="end"
+            )
+            
+        if search_pos:
+            line, char = map(int, search_pos.split('.'))
+            self.text.tag_remove("search", "1.0", "end")
+            self.text.tag_add(
+                "search",
+                search_pos,
+                f"{line}.{char + len(search_text)}"
+            )
+            self.text.tag_configure("search", background="yellow")
+            self.text.see(search_pos)
+            self.text.mark_set("insert", search_pos)
+        else:
+            # Start from beginning if not found
+            if not backwards:
+                self.text.mark_set("insert", "1.0")
+                self.find_text()
+
 def main():
     """Main function."""
     progress_msgs = PROGRESS_MESSAGES
@@ -827,11 +1060,11 @@ def main():
     paned_window.pack(fill="both", expand=True)
 
     # Create top pane for input
-    input_pane = ctk.CTkFrame(paned_window)
+    input_pane = InputPane(paned_window)
     paned_window.add(input_pane, weight=1)
 
     # Create bottom pane for output
-    output_pane = ctk.CTkFrame(paned_window)
+    output_pane = OutputPane(paned_window)
     paned_window.add(output_pane, weight=2)
 
     # Create model status indicators
