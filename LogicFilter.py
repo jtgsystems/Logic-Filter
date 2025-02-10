@@ -2,11 +2,80 @@ import customtkinter as ctk
 import logging
 from rich.logging import RichHandler
 import tkinter as tk
-import json
 from tkinter import ttk, filedialog, messagebox
+from ttkthemes import ThemedStyle
+import json
 from datetime import datetime
 import requests
 import sys
+import os
+import psutil
+
+# Initialize logging first
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(message)s",
+    datefmt="[%X]",
+    handlers=[RichHandler(rich_tracebacks=True)]
+)
+logger = logging.getLogger("prompt_enhancer")
+
+# After logging initialization but before any ollama imports
+def check_ollama_service():
+    """Check if Ollama service is running and accessible."""
+    try:
+        response = requests.get("http://localhost:11434/api/health", timeout=5)
+        return response.status_code == 200
+    except requests.exceptions.RequestException:
+        return False
+
+class InitializationError(Exception):
+    """Custom exception for initialization errors."""
+    pass
+
+def ensure_ollama_running():
+    """Ensure Ollama service is running before importing."""
+    if not check_ollama_service():
+        tk.messagebox.showerror(
+            "Ollama Service Not Found",
+            "The Ollama service is not running. Please start Ollama and try again.\n\n"
+            "If Ollama is not installed, visit: https://ollama.com/download"
+        )
+        raise InitializationError("Ollama service not running")
+
+# Check Ollama service
+try:
+    ensure_ollama_running()
+    import ollama
+except InitializationError:
+    sys.exit(1)
+except ImportError:
+    tk.messagebox.showerror(
+        "Import Error",
+        "Failed to import ollama module. Please ensure it's installed:\n\n"
+        "pip install ollama"
+    )
+    sys.exit(1)
+
+# Initialize customtkinter
+ctk.set_appearance_mode("dark")
+ctk.set_default_color_theme("blue")
+
+# Make sure customtkinter's images are in the correct path
+assets_dir = os.path.join(os.path.dirname(__file__), "assets")
+if not os.path.exists(assets_dir):
+    os.makedirs(assets_dir)
+os.environ["CUSTOMTKINTER_IMAGES_PATH"] = assets_dir
+
+# Configure TTK theme
+def configure_ttk_style():
+    style = ThemedStyle()
+    style.set_theme("equilux")  # Dark theme that matches customtkinter
+    return style
+
+# Set customtkinter appearance mode and color theme
+ctk.set_appearance_mode("dark")
+ctk.set_default_color_theme("blue")
 
 # Configuration
 OLLAMA_MODELS = {
@@ -45,49 +114,13 @@ PROGRESS_MESSAGES = {
     "complete": "Process complete.\n\n",
 }
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(message)s",
-    datefmt="[%X]",
-    handlers=[RichHandler(rich_tracebacks=True)]
-)
-logger = logging.getLogger("prompt_enhancer")
-
-def check_ollama_service():
-    """Check if Ollama service is running and accessible."""
-    try:
-        response = requests.get("http://localhost:11434/api/health", timeout=5)
-        if response.status_code == 200:
-            return True
-    except requests.exceptions.RequestException:
-        return False
-    return False
-
-def ensure_ollama_running():
-    """Ensure Ollama service is running before importing."""
-    if not check_ollama_service():
-        messagebox.showerror(
-            "Ollama Service Not Found",
-            "The Ollama service is not running. Please start Ollama and try again.\n\n"
-            "If Ollama is not installed, visit: https://ollama.com/download"
-        )
-        sys.exit(1)
-
-# Check Ollama service before importing
-ensure_ollama_running()
-
-# Now import ollama after confirming service is running
-import ollama
-
-# Set customtkinter appearance
-ctk.set_appearance_mode("dark")
-ctk.set_default_color_theme("blue")
-
-
-class OllamaError(Exception):
-    """Custom exception for Ollama-related errors."""
-    pass
+# Global variables for UI elements
+root = None
+input_text = None
+output_text = None
+status_bar = None
+loading = None
+processing_history = None
 
 def verify_model_availability(model_name):
     """Verify if an Ollama model is available."""
@@ -232,7 +265,7 @@ def finalize_prompt(vetting_report, original_prompt, model_name):
                 ),
             }
         ]
-        response = ollama.chat(model=model_name, messages=messages)
+        response = ollama.chat(model_name, messages=messages)
         return response["message"]["content"]
     except Exception as e:
         logger.error(f"Error during finalization: {e}")
@@ -344,7 +377,9 @@ def create_model_indicators(parent):
         label.pack(side="left", padx=5)
         indicators[model_type] = label
 
-    return indicators
+    # Store indicators in app_state
+    app_state.model_indicators = indicators
+    return frame
 
 
 def create_scrolled_text(parent, height=10, width=50, readonly=False):
@@ -414,7 +449,7 @@ class LoadingIndicator:
     """Animated loading indicator."""
     def __init__(self, parent):
         self.parent = parent
-        self.frame = ctk.CTkFrame(parent)
+        self.frame = ctk.CTkFrame(self.parent)
         self.progress = ctk.CTkProgressBar(self.frame)
         self.progress.set(0)  # Initialize progress to 0
         self.progress.pack(pady=10, padx=20, fill="x")
@@ -501,7 +536,6 @@ class StatusBar(ctk.CTkFrame):
         
     def update_memory_usage(self):
         """Update memory usage indicator"""
-        import psutil
         process = psutil.Process()
         memory_mb = process.memory_info().rss / 1024 / 1024
         self.memory_label.configure(text=f"Memory: {memory_mb:.1f}MB")
@@ -527,31 +561,202 @@ def create_status_bar(parent):
     status_bar.pack(fill="x", side="bottom", pady=(5,0))
     return status_bar
 
-def create_menu(root, input_text, output_text):
-    """Create menu bar with keyboard shortcuts."""
-    def clear_all():
-        input_text.delete("1.0", "end")
-        output_text.configure(state="normal")
-        output_text.delete("1.0", "end")
-        output_text.configure(state="disabled")
+class Toolbar(ctk.CTkFrame):
+    """Enhanced toolbar with updatable references"""
+    def __init__(self, parent, input_text=None, output_text=None):
+        super().__init__(parent)
+        self.input_text = input_text
+        self.output_text = output_text
+        self.setup_ui()
+        self.pack(fill="x", pady=(0, 10))
+        
+    def setup_ui(self):
+        buttons = [
+            ("New (Ctrl+N)", self.new_document, "⌘"),
+            ("Clear Output (Ctrl+L)", self.clear_output, "⌫"),
+            ("Copy Output (Ctrl+Shift+C)", self.copy_output, "©"),
+            ("Save Output (Ctrl+S)", self.save_output, "💾"),
+            ("Export History (Ctrl+E)", self.export_history, "📋")
+        ]
+        
+        for text, command, icon in buttons:
+            btn = ctk.CTkButton(
+                self,
+                text=f"{icon} {text}",
+                command=command,
+                width=120,
+                height=32
+            )
+            btn.pack(side="left", padx=5)
+            
+    def update_references(self, input_text, output_text):
+        """Update text widget references"""
+        self.input_text = input_text
+        self.output_text = output_text
+        
+    def new_document(self):
+        if self.input_text:
+            self.input_text.delete("1.0", "end")
+            
+    def clear_output(self):
+        if self.output_text:
+            self.output_text.configure(state="normal")
+            self.output_text.delete("1.0", "end")
+            self.output_text.configure(state="disabled")
+            
+    def copy_output(self):
+        if self.output_text and root:
+            root.clipboard_clear()
+            root.clipboard_append(self.output_text.get("1.0", "end").strip())
+            
+    def save_output(self):
+        if self.output_text:
+            file_path = filedialog.asksaveasfilename(
+                defaultextension=".txt",
+                filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
+            )
+            if file_path:
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(self.output_text.get("1.0", "end"))
+                    
+    def export_history(self):
+        if processing_history:
+            file_path = filedialog.asksaveasfilename(
+                defaultextension=".json",
+                filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
+            )
+            if file_path:
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    json.dump(processing_history.history, f, indent=2)
 
-    def copy_output():
-        root.clipboard_clear()
-        root.clipboard_append(output_text.get("1.0", "end").strip())
+def create_toolbar(parent):
+    """Create toolbar with common actions."""
+    return Toolbar(parent)  # Let the class handle the references later
 
-    menubar = tk.Menu(root)
-    root.config(menu=menubar)
+class MenuManager:
+    """Manages application menus and keyboard shortcuts"""
+    def __init__(self, root, input_text=None, output_text=None):
+        self.root = root
+        self.input_text = input_text
+        self.output_text = output_text
+        self.create_menu()
+        self.bind_shortcuts()
+        
+    def update_references(self, input_text, output_text):
+        """Update text widget references"""
+        self.input_text = input_text
+        self.output_text = output_text
+        
+    def create_menu(self):
+        menubar = tk.Menu(self.root)
+        self.root.config(menu=menubar)
 
-    file_menu = tk.Menu(menubar, tearoff=0)
-    menubar.add_cascade(label="File", menu=file_menu)
-    file_menu.add_command(label="Clear All (Ctrl+L)", command=clear_all)
-    file_menu.add_command(label="Copy Output (Ctrl+Shift+C)", command=copy_output)
-    file_menu.add_separator()
-    file_menu.add_command(label="Exit", command=root.quit)
+        # File menu
+        file_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="File", menu=file_menu)
+        
+        file_menu.add_command(label="New (Ctrl+N)", command=self.new_document)
+        file_menu.add_command(label="Clear Output (Ctrl+L)", command=self.clear_output)
+        file_menu.add_command(label="Copy Output (Ctrl+Shift+C)", command=self.copy_output)
+        file_menu.add_command(label="Save Output (Ctrl+S)", command=self.save_output)
+        file_menu.add_command(label="Export History (Ctrl+E)", command=self.export_history)
+        file_menu.add_separator()
+        file_menu.add_command(label="Settings", command=self.show_settings)
+        file_menu.add_separator()
+        file_menu.add_command(label="Exit", command=self.root.quit)
+        
+        # Edit menu
+        edit_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Edit", menu=edit_menu)
+        
+        edit_menu.add_command(label="Undo (Ctrl+Z)", command=self.undo)
+        edit_menu.add_command(label="Redo (Ctrl+Y)", command=self.redo)
+        
+        # Help menu
+        help_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Help", menu=help_menu)
+        help_menu.add_command(label="About", command=self.show_about)
+        
+    def bind_shortcuts(self):
+        self.root.bind("<Control-n>", lambda e: self.new_document())
+        self.root.bind("<Control-l>", lambda e: self.clear_output())
+        self.root.bind("<Control-Shift-KeyPress-C>", lambda e: self.copy_output())
+        self.root.bind("<Control-s>", lambda e: self.save_output())
+        self.root.bind("<Control-e>", lambda e: self.export_history())
+        self.root.bind("<Control-z>", lambda e: self.undo())
+        self.root.bind("<Control-y>", lambda e: self.redo())
+        
+    def new_document(self):
+        if self.input_text:
+            self.input_text.delete("1.0", "end")
+            
+    def clear_output(self):
+        if self.output_text:
+            self.output_text.configure(state="normal")
+            self.output_text.delete("1.0", "end")
+            self.output_text.configure(state="disabled")
+            
+    def copy_output(self):
+        if self.output_text:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(self.output_text.get("1.0", "end").strip())
+            
+    def save_output(self):
+        if self.output_text:
+            file_path = filedialog.asksaveasfilename(
+                defaultextension=".txt",
+                filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
+            )
+            if file_path:
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.write(self.output_text.get("1.0", "end"))
+                    
+    def export_history(self):
+        if processing_history:
+            file_path = filedialog.asksaveasfilename(
+                defaultextension=".json",
+                filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
+            )
+            if file_path:
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    json.dump(processing_history.history, f, indent=2)
+                    
+    def show_settings(self):
+        SettingsDialog(self.root, settings_manager)
+        
+    def show_about(self):
+        messagebox.showinfo(
+            "About Prompt Enhancer",
+            "Prompt Enhancer v1.0\n\n"
+            "A tool for analyzing and improving prompts using multiple LLM models.\n\n"
+            "Created with ❤️ using Python and CustomTkinter."
+        )
+        
+    def undo(self):
+        if processing_history and processing_history.can_undo():
+            entry = processing_history.undo()
+            if entry and self.input_text and self.output_text:
+                self.input_text.delete("1.0", "end")
+                self.input_text.insert("1.0", entry['input'])
+                self.output_text.configure(state="normal")
+                self.output_text.delete("1.0", "end")
+                self.output_text.insert("1.0", entry['output'])
+                self.output_text.configure(state="disabled")
+                
+    def redo(self):
+        if processing_history and processing_history.can_redo():
+            entry = processing_history.redo()
+            if entry and self.input_text and self.output_text:
+                self.input_text.delete("1.0", "end")
+                self.input_text.insert("1.0", entry['input'])
+                self.output_text.configure(state="normal")
+                self.output_text.delete("1.0", "end")
+                self.output_text.insert("1.0", entry['output'])
+                self.output_text.configure(state="disabled")
 
-    # Bind keyboard shortcuts
-    root.bind("<Control-l>", lambda e: clear_all())
-    root.bind("<Control-Shift-KeyPress-C>", lambda e: copy_output())
+def create_menu(root, input_text=None, output_text=None):
+    """Create application menu and return the manager"""
+    return MenuManager(root, input_text, output_text)
 
 def sanitize_output(text):
     """Sanitize and clean up the model output."""
@@ -570,20 +775,40 @@ def sanitize_output(text):
     
     return text.strip()
 
-def update_output(text):
+class OllamaError(Exception):
+    """Custom exception for Ollama-related errors."""
+    pass
+
+class OutputHandler:
+    """Handles output text updates safely"""
+    @staticmethod
+    def update(text_widget, text, is_error=False):
+        try:
+            text_widget.configure(state="normal")
+            text_widget.delete("1.0", "end")
+            text_widget.insert("end", text)
+            text_widget.configure(state="disabled")
+            text_widget.see("end")
+            if is_error:
+                text_widget.tag_add("error", "1.0", "end")
+                text_widget.tag_configure("error", foreground="red")
+        except Exception as e:
+            logger.error(f"Failed to update output: {e}")
+
+def update_output(text, is_error=False):
     """Updates the output text area."""
     try:
-        output_text.configure(state="normal")
-        output_text.delete("1.0", "end")
         text = sanitize_output(text)
-        output_text.insert("end", text)
-        output_text.configure(state="disabled")
-        output_text.see("end")
-        status_bar.set_status("Ready")
+        OutputHandler.update(app_state.output_text, text, is_error)
+        app_state.status_bar.set_status(
+            "Error" if is_error else "Ready",
+            is_error=is_error
+        )
         logger.info(text.strip())
     except Exception as e:
         logger.error(f"Failed to update output: {e}")
-        status_bar.set_status("Error updating output", is_error=True)
+        if app_state.status_bar:
+            app_state.status_bar.set_status("Error updating output", is_error=True)
 
 def handle_phase_error(phase_name, error, progress_tracker, loading, current_output):
     """Handle errors during any processing phase."""
@@ -605,10 +830,10 @@ def handle_phase_error(phase_name, error, progress_tracker, loading, current_out
 
 def reset_ui_state():
     """Reset UI state after processing."""
-    status_bar.set_status("Ready")
-    loading.stop()
+    app_state.status_bar.set_status("Ready")
+    app_state.loading.stop()
     reset_indicators()  # Reset all model indicators
-    root.update()
+    app_state.root.update()
 
 def create_toolbar(parent, input_text, output_text):
     """Create toolbar with common actions."""
@@ -641,8 +866,8 @@ def clear_output(output_text):
     output_text.configure(state="disabled")
 
 def copy_to_clipboard(output_text):
-    root.clipboard_clear()
-    root.clipboard_append(output_text.get("1.0", "end").strip())
+    app_state.root.clipboard_clear()
+    app_state.root.clipboard_append(output_text.get("1.0", "end").strip())
     
 def save_output(output_text):
     file_path = filedialog.asksaveasfilename(
@@ -660,7 +885,7 @@ def export_history():
     )
     if file_path:
         with open(file_path, 'w', encoding='utf-8') as f:
-            json.dump(processing_history, f, indent=2)
+            json.dump(app_state.processing_history, f, indent=2)
 
 class ProcessingHistory:
     """Manages processing history and undo/redo functionality."""
@@ -710,7 +935,7 @@ class ProcessingHistory:
 class SettingsManager:
     """Manages application settings."""
     def __init__(self):
-        self.settings_file = 'settings.json'
+        self.settings_file = os.path.join(os.path.dirname(__file__), 'settings.json')
         self.default_settings = {
             'theme': 'dark',
             'font_size': 12,
@@ -718,22 +943,34 @@ class SettingsManager:
             'autosave': True,
             'show_model_indicators': True,
             'save_window_state': True,
-            'default_models': OLLAMA_MODELS.copy()
+            'default_models': OLLAMA_MODELS.copy(),
+            'window': {
+                'geometry': '1024x768',
+                'zoomed': False
+            }
         }
         self.settings = self.load_settings()
         
     def load_settings(self):
         """Load settings from file."""
         try:
-            with open(self.settings_file, 'r') as f:
-                return {**self.default_settings, **json.load(f)}
-        except:
+            if os.path.exists(self.settings_file):
+                with open(self.settings_file, 'r') as f:
+                    loaded = json.load(f)
+                    # Merge with defaults to ensure all settings exist
+                    return {**self.default_settings, **loaded}
+            return self.default_settings.copy()
+        except Exception as e:
+            logger.error(f"Failed to load settings: {e}")
             return self.default_settings.copy()
             
     def save_settings(self):
         """Save current settings to file."""
-        with open(self.settings_file, 'w') as f:
-            json.dump(self.settings, f, indent=2)
+        try:
+            with open(self.settings_file, 'w') as f:
+                json.dump(self.settings, f, indent=2)
+        except Exception as e:
+            logger.error(f"Failed to save settings: {e}")
             
     def get(self, key, default=None):
         """Get a setting value."""
@@ -741,10 +978,22 @@ class SettingsManager:
         
     def set(self, key, value):
         """Set a setting value."""
-        self.settings[key] = value
+        try:
+            self.settings[key] = value
+            if self.get('autosave', True):
+                self.save_settings()
+        except Exception as e:
+            logger.error(f"Failed to set setting {key}: {e}")
+
+    def update_window_state(self, geometry, zoomed):
+        """Update window state settings."""
+        self.settings['window'] = {
+            'geometry': geometry,
+            'zoomed': zoomed
+        }
         if self.get('autosave', True):
             self.save_settings()
-            
+
 class SettingsDialog:
     """Dialog for editing application settings."""
     def __init__(self, parent, settings_manager):
@@ -1047,316 +1296,245 @@ class OutputPane(ctk.CTkFrame):
                 self.text.mark_set("insert", "1.0")
                 self.find_text()
 
+def process_prompt():
+    """Process the input prompt through the enhancement pipeline."""
+    try:
+        app_state.status_bar.set_status("Processing...")
+        progress = ProgressTracker()
+        app_state.loading.start(0)
+        
+        # Validate models before starting
+        unavailable_models = validate_models()
+        if unavailable_models:
+            error_msg = "Some models are not available. Using fallback models where possible.\n"
+            for purpose, model in unavailable_models:
+                if model in FALLBACK_ORDER:
+                    fallbacks = ", ".join(FALLBACK_ORDER[model])
+                    error_msg += f"- {purpose}: {model} (fallbacks: {fallbacks})\n"
+                else:
+                    error_msg += f"- {purpose}: {model} (no fallbacks available)\n"
+            logger.warning(error_msg)
+
+        initial_prompt = app_state.input_text.get("1.0", "end").strip()
+        if not initial_prompt:
+            update_output("Error: No prompt entered.")
+            app_state.loading.stop()
+            return
+
+        output = PROGRESS_MESSAGES["start"]
+        update_output(output)
+
+        # Store results between phases
+        results = {}
+
+        # Process through each phase
+        phases = [
+            ("Analysis", "analyzing", analyze_prompt, "analysis", [lambda: initial_prompt]),
+            ("Generation", "generating", generate_solutions, "generation", [lambda: results["Analysis"]]),
+            ("Vetting", "vetting", vet_and_refine, "vetting", [lambda: results["Generation"]]),
+            ("Finalization", "finalizing", finalize_prompt, "finalization", [lambda: results["Vetting"], lambda: initial_prompt]),
+            ("Enhancement", "enhancing", enhance_prompt, "enhancement", [lambda: results["Finalization"]]),
+            ("Review", "comprehensive", comprehensive_review, "comprehensive", [
+                lambda: initial_prompt,
+                lambda: results["Analysis"],
+                lambda: results["Generation"],
+                lambda: results["Vetting"],
+                lambda: results["Finalization"],
+                lambda: results["Enhancement"]
+            ])
+        ]
+
+        for phase_name, msg_key, func, model_key, arg_providers in phases:
+            app_state.status_bar.set_status(f"Running {phase_name}...")
+            app_state.loading.update_label(f"Running {phase_name}...")
+            output += PROGRESS_MESSAGES[msg_key]
+            update_output(output)
+
+            try:
+                # Get arguments for this phase
+                args = [provider() for provider in arg_providers]
+                args.append(OLLAMA_MODELS[model_key])  # Add model name as last argument
+                
+                # Run the phase
+                result = retry_with_fallback(func, *args)
+                results[phase_name] = result
+
+                progress.update(phase_name)
+                output += PROGRESS_MESSAGES[msg_key.replace("ing", "_done")]
+                output += result + "\n\n"
+                update_output(output)
+                app_state.loading.start(progress.get_progress())
+
+            except Exception as e:
+                error_msg = handle_phase_error(phase_name, e, progress, app_state.loading, output)
+                update_output(output + error_msg)
+                return
+
+        # Add to history
+        app_state.processing_history.add(initial_prompt, output)
+        
+    except Exception as e:
+        logger.exception("Error during prompt processing")
+        update_output(f"An error occurred: {str(e)}")
+    finally:
+        app_state.status_bar.set_status("Ready")
+        app_state.loading.stop()
+        app_state.root.update()
+
+class ApplicationState:
+    """Global application state manager"""
+    def __init__(self):
+        self.root = None
+        self.input_text = None
+        self.output_text = None
+        self.status_bar = None
+        self.loading = None
+        self.processing_history = None
+        self.settings_manager = None
+        self.toolbar = None
+        self.menu_manager = None
+        self.model_indicators = None  # Add model indicators reference
+        
+    def initialize(self, root):
+        """Initialize application state with root window"""
+        self.root = root
+        self.settings_manager = SettingsManager()
+        self.processing_history = ProcessingHistory()
+
+    def reset_indicators(self):
+        """Reset all model indicators to inactive state"""
+        if self.model_indicators:
+            for label in self.model_indicators.values():
+                label.configure(text_color="gray")
+
+    def set_active_model(self, model_type):
+        """Set a model indicator as active"""
+        if self.model_indicators and model_type in self.model_indicators:
+            self.reset_indicators()
+            self.model_indicators[model_type].configure(text_color="#4a90e2")
+        
+    def update_references(self, **kwargs):
+        """Update component references"""
+        for key, value in kwargs.items():
+            if hasattr(self, key):
+                setattr(self, key, value)
+                
+        # Update toolbar references if available
+        if self.toolbar and ('input_text' in kwargs or 'output_text' in kwargs):
+            self.toolbar.update_references(self.input_text, self.output_text)
+            
+        # Update menu references if available
+        if self.menu_manager and ('input_text' in kwargs or 'output_text' in kwargs):
+            self.menu_manager.update_references(self.input_text, self.output_text)
+
+# Create global application state
+app_state = ApplicationState()
+
 def main():
     """Main function."""
-    progress_msgs = PROGRESS_MESSAGES
-
-    root = ctk.CTk()
-    root.title("Prompt Enhancer")
-    root.minsize(800, 600)
-    root.geometry("1024x768")  # Set default size
-    
-    # Save window size and position on close
-    def save_window_state(event=None):
-        if root.winfo_exists():
-            config = {
-                'geometry': root.geometry(),
-                'zoomed': root.state() == 'zoomed'
-            }
-            with open('window_state.json', 'w') as f:
-                json.dump(config, f)
-    
-    # Load previous window state
     try:
-        with open('window_state.json', 'r') as f:
-            config = json.load(f)
-            if config.get('zoomed'):
-                root.state('zoomed')
-            else:
-                root.geometry(config['geometry'])
-    except:
-        pass  # Use default if no saved state
+        # Configure ttk style first
+        style = configure_ttk_style()
         
-    root.protocol("WM_DELETE_WINDOW", lambda: [save_window_state(), root.destroy()])
-    
-    main_frame = ctk.CTkFrame(root)
-    main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+        # Initialize main window
+        root = ctk.CTk()
+        root.title("Prompt Enhancer")
+        root.minsize(800, 600)
+        root.geometry("1024x768")
 
-    # Create splitter frame for resizable panes
-    paned_window = ttk.PanedWindow(main_frame, orient="vertical")
-    paned_window.pack(fill="both", expand=True)
+        # Initialize application state
+        app_state.initialize(root)
+        
+        # Create main container
+        main_frame = ctk.CTkFrame(root)
+        main_frame.pack(fill="both", expand=True, padx=20, pady=20)
 
-    # Create top pane for input
-    input_pane = InputPane(paned_window)
-    paned_window.add(input_pane, weight=1)
+        # Create model indicators
+        model_indicators_frame = create_model_indicators(main_frame)
+        
+        # Create status bar
+        status_bar = StatusBar(root)
+        status_bar.pack(fill="x", side="bottom", pady=(5,0))
+        app_state.update_references(status_bar=status_bar)
 
-    # Create bottom pane for output
-    output_pane = OutputPane(paned_window)
-    paned_window.add(output_pane, weight=2)
+        # Create toolbar with initial None references
+        toolbar = Toolbar(main_frame)
+        app_state.update_references(toolbar=toolbar)
 
-    # Create model status indicators
-    model_indicators = create_model_indicators(main_frame)
+        # Create paned window for resizable sections
+        paned_window = ttk.PanedWindow(main_frame, orient="vertical", style="Vertical.TPanedwindow")
+        paned_window.pack(fill="both", expand=True, pady=(10, 0))
 
-    # Reset all indicators to inactive
-    def reset_indicators():
-        for label in model_indicators.values():
-            label.configure(text_color="gray")
+        # Create input pane
+        input_pane = InputPane(paned_window)
+        paned_window.add(input_pane, weight=1)
+        
+        # Create output pane
+        output_pane = OutputPane(paned_window)
+        paned_window.add(output_pane, weight=2)
+        
+        # Update references for input and output
+        app_state.update_references(
+            input_text=input_pane.text,
+            output_text=output_pane.text
+        )
+        
+        # Create loading indicator
+        loading = LoadingIndicator(main_frame)
+        app_state.update_references(loading=loading)
 
-    # Set an indicator as active
-    def set_active_model(model_type):
-        reset_indicators()
-        model_indicators[model_type].configure(text_color="#4a90e2")
+        # Create process button
+        process_button = ctk.CTkButton(
+            main_frame,
+            text="Process & Improve Prompt",
+            command=process_prompt,
+            font=("Arial", 12),
+            height=40,
+        )
+        process_button.pack(pady=10)
 
-    input_label = ctk.CTkLabel(
-        input_pane,
-        text="Enter your prompt:",
-        font=("Arial", 14, "bold"),
-    )
-    input_label.pack(anchor="w")
+        # Create menu manager
+        menu_manager = MenuManager(root)
+        app_state.update_references(menu_manager=menu_manager)
 
-    input_frame, input_text = create_scrolled_text(
-        input_pane,
-        height=100,
-        width=700,
-    )
-    input_frame.pack(fill="x", pady=(5, 15))
+        # Window state management
+        def save_window_state(event=None):
+            if root.winfo_exists():
+                config = {
+                    'geometry': root.geometry(),
+                    'zoomed': root.state() == 'zoomed'
+                }
+                with open('window_state.json', 'w') as f:
+                    json.dump(config, f)
 
-    output_label = ctk.CTkLabel(
-        output_pane,
-        text="Results:",
-        font=("Arial", 14, "bold"),
-    )
-    output_label.pack(anchor="w")
-
-    output_frame, output_text = create_scrolled_text(
-        output_pane,
-        height=400,
-        width=700,
-        readonly=True,
-    )
-    output_frame.pack(fill="both", expand=True, pady=(5, 15))
-
-    # Add loading indicator after the input area
-    loading = LoadingIndicator(main_frame)
-
-    # Add status bar before mainloop
-    status_bar = create_status_bar(main_frame)
-
-    # Add toolbar
-    create_toolbar(main_frame, input_text, output_text)
-
-    def process_prompt():
+        # Load previous window state
         try:
-            status_bar.set_status("Processing...")
-            progress = ProgressTracker()
-            loading.start(0)
-            
-            # Validate models before starting
-            unavailable_models = validate_models()
-            if unavailable_models:
-                error_msg = "Some models are not available. Using fallback models where possible.\n"
-                for purpose, model in unavailable_models:
-                    if model in FALLBACK_ORDER:
-                        fallbacks = ", ".join(FALLBACK_ORDER[model])
-                        error_msg += f"- {purpose}: {model} (fallbacks: {fallbacks})\n"
-                    else:
-                        error_msg += f"- {purpose}: {model} (no fallbacks available)\n"
-                logger.warning(error_msg)
-                status_bar.set_model_status("Some models unavailable", is_error=True)
+            with open('window_state.json', 'r') as f):
+                config = json.load(f)
+                if config.get('zoomed'):
+                    root.state('zoomed')
+                else:
+                    root.geometry(config['geometry'])
+        except:
+            pass  # Use default if no saved state
 
-            initial_prompt = input_text.get("1.0", "end").strip()
-            if not initial_prompt:
-                update_output("Error: No prompt entered.")
-                loading.stop()
-                return
+        root.protocol("WM_DELETE_WINDOW", lambda: [save_window_state(), root.destroy()])
 
-            output = progress_msgs["start"]
-            update_output(output)
+        # Set initial theme from settings
+        ctk.set_appearance_mode(app_state.settings_manager.get('theme', 'dark'))
 
-            # Phase 1: Analysis with retry
-            logger.info("Starting analysis phase...")
-            set_active_model("analysis")
-            output += progress_msgs["analyzing"]
-            loading.update_label("Analyzing prompt...")
-            update_output(output)
+        # Create assets directory if it doesn't exist
+        assets_dir = os.path.join(os.path.dirname(__file__), "assets")
+        if not os.path.exists(assets_dir):
+            os.makedirs(assets_dir)
 
-            try:
-                analysis_report = retry_with_fallback(
-                    analyze_prompt,
-                    initial_prompt,
-                    OLLAMA_MODELS["analysis"]
-                )
-                progress.update("analysis")
-            except OllamaError as e:
-                error_output = handle_phase_error("analysis", e, progress, loading, output)
-                update_output(error_output)
-                reset_ui_state()
-                return
+        # Start the application
+        root.mainloop()
 
-            output += progress_msgs["analysis_done"]
-            output += analysis_report + "\n\n"
-            update_output(output)
-            loading.start(progress.get_progress())
-
-            # Phase 2: Solution Generation
-            set_active_model("generation")
-            output += progress_msgs["generating"]
-            loading.update_label("Generating solutions...")
-            update_output(output)
-
-            try:
-                solutions = retry_with_fallback(
-                    generate_solutions,
-                    analysis_report,
-                    OLLAMA_MODELS["generation"]
-                )
-                progress.update("generation")
-            except OllamaError as e:
-                error_output = handle_phase_error("generation", e, progress, loading, output)
-                update_output(error_output)
-                reset_ui_state()
-                return
-
-            output += progress_msgs["generation_done"]
-            output += solutions + "\n\n"
-            update_output(output)
-            loading.start(progress.get_progress())
-
-            # Phase 3: Vetting
-            set_active_model("vetting")
-            output += progress_msgs["vetting"]
-            loading.update_label("Vetting solutions...")
-            update_output(output)
-
-            try:
-                vetting_report = retry_with_fallback(
-                    vet_and_refine,
-                    solutions,
-                    OLLAMA_MODELS["vetting"]
-                )
-                progress.update("vetting")
-            except OllamaError as e:
-                error_output = handle_phase_error("vetting", e, progress, loading, output)
-                update_output(error_output)
-                reset_ui_state()
-                return
-
-            output += progress_msgs["vetting_done"]
-            output += vetting_report + "\n\n"
-            update_output(output)
-            loading.start(progress.get_progress())
-
-            # Phase 4: Initial Finalization
-            set_active_model("finalization")
-            output += progress_msgs["finalizing"]
-            loading.update_label("Finalizing prompt...")
-            update_output(output)
-
-            try:
-                final_result = retry_with_fallback(
-                    finalize_prompt,
-                    vetting_report,
-                    initial_prompt,
-                    OLLAMA_MODELS["finalization"]
-                )
-                progress.update("finalization")
-            except OllamaError as e:
-                error_output = handle_phase_error("finalization", e, progress, loading, output)
-                update_output(error_output)
-                reset_ui_state()
-                return
-
-            output += progress_msgs["finalize_done"]
-            output += final_result + "\n\n"
-            update_output(output)
-            loading.start(progress.get_progress())
-
-            # Phase 5: Enhancement
-            set_active_model("enhancement")
-            output += progress_msgs["enhancing"]
-            loading.update_label("Enhancing prompt...")
-            update_output(output)
-
-            try:
-                enhanced_result = retry_with_fallback(
-                    enhance_prompt,
-                    final_result,
-                    OLLAMA_MODELS["enhancement"]
-                )
-                progress.update("enhancement")
-            except OllamaError as e:
-                error_output = handle_phase_error("enhancement", e, progress, loading, output)
-                update_output(error_output)
-                reset_ui_state()
-                return
-
-            output += progress_msgs["enhance_done"]
-            output += enhanced_result + "\n\n"
-            update_output(output)
-            loading.start(progress.get_progress())
-
-            # Phase 6: Comprehensive Review
-            set_active_model("comprehensive")
-            output += progress_msgs["comprehensive"]
-            loading.update_label("Performing comprehensive review...")
-            update_output(output)
-
-            try:
-                # First use comprehensive model
-                comprehensive_result = retry_with_fallback(
-                    comprehensive_review,
-                    initial_prompt,
-                    analysis_report,
-                    solutions,
-                    vetting_report,
-                    final_result,
-                    enhanced_result,
-                    OLLAMA_MODELS["comprehensive"]
-                )
-                progress.update("comprehensive")
-            except OllamaError as e:
-                error_output = handle_phase_error("comprehensive", e, progress, loading, output)
-                update_output(error_output)
-                reset_ui_state()
-                return
-
-            # Final presentation cleanup
-            set_active_model("presenter")
-            loading.update_label("Cleaning up presentation...")
-            output += "Cleaning up final presentation...\n"
-            update_output(output)
-
-            # Present final result
-            output += progress_msgs["complete"]
-            if "PRESENT TO USER:" in comprehensive_result:
-                final_text = comprehensive_result.split("PRESENT TO USER:", 1)[1].strip()
-                output += final_text + "\n"
-            else:
-                output += comprehensive_result + "\n"
-            update_output(output)
-
-        except Exception as e:
-            logger.exception("Error during prompt processing")
-            update_output(f"An error occurred: {str(e)}")
-            return
-        finally:
-            status_bar.set_status("Ready")
-            loading.stop()
-
-    process_button = ctk.CTkButton(
-        main_frame,
-        text="Process & Improve Prompt",
-        command=process_prompt,
-        font=("Arial", 12),
-        height=40,
-    )
-    process_button.pack(pady=10)
-
-    # Add menu bar after root setup
-    create_menu(root, input_text, output_text)
-
-    root.mainloop()
-
+    except Exception as e:
+        logger.exception("Failed to initialize application")
+        messagebox.showerror("Error", f"Failed to start application: {str(e)}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
