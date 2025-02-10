@@ -1,17 +1,46 @@
 # -*- coding: utf-8 -*-
+import sys
+import traceback
+
 try:
-    import customtkinter as ctk
-    import logging
-    from rich.logging import RichHandler
+    # Core Python imports
     import tkinter as tk
-    import json
     from tkinter import ttk, filedialog, messagebox
     from datetime import datetime
-    import requests
-    import sys
-except ImportError as e:
-    print(f"Error importing required module: {e}")
-    print("Please ensure all dependencies are installed by running:")
+    import json
+    
+    # Third-party imports with error messages
+    try:
+        import customtkinter as ctk
+    except ImportError:
+        print("Error: customtkinter not found. Installing...")
+        import subprocess
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "customtkinter"])
+        import customtkinter as ctk
+        
+    try:
+        import requests
+    except ImportError:
+        print("Error: requests not found. Installing...")
+        import subprocess
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "requests"])
+        import requests
+        
+    try:
+        from rich.logging import RichHandler
+        import logging
+    except ImportError:
+        print("Error: rich not found. Installing...")
+        import subprocess
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "rich"])
+        from rich.logging import RichHandler
+        import logging
+
+except Exception as e:
+    print(f"Critical error during initialization: {e}")
+    print("\nFull traceback:")
+    traceback.print_exc()
+    print("\nPlease ensure all dependencies are installed by running:")
     print("pip install -r requirements.txt")
     sys.exit(1)
 
@@ -212,7 +241,7 @@ def vet_and_refine(improvements, model_name):
                 ),
             }
         ]
-        response = ollama.chat(model=model_name, messages=messages)
+        response = ollama.chat(model_name, messages=messages)
         return response["message"]["content"]
     except Exception as e:
         logger.error(f"Error during vetting: {e}")
@@ -239,7 +268,7 @@ def finalize_prompt(vetting_report, original_prompt, model_name):
                 ),
             }
         ]
-        response = ollama.chat(model=model_name, messages=messages)
+        response = ollama.chat(model_name, messages=messages)
         return response["message"]["content"]
     except Exception as e:
         logger.error(f"Error during finalization: {e}")
@@ -267,7 +296,7 @@ def enhance_prompt(final_prompt, model_name):
                 ),
             }
         ]
-        response = ollama.chat(model=model_name, messages=messages)
+        response = ollama.chat(model_name, messages=messages)
         return response["message"]["content"]
     except Exception as e:
         logger.error(f"Error during enhancement: {e}")
@@ -421,7 +450,7 @@ class LoadingIndicator:
     """Animated loading indicator."""
     def __init__(self, parent):
         self.parent = parent
-        self.frame = ctk.CTkFrame(parent)
+        self.frame = ctk.CTkFrame(self.frame)
         self.progress = ctk.CTkProgressBar(self.frame)
         self.progress.set(0)  # Initialize progress to 0
         self.progress.pack(pady=10, padx=20, fill="x")
