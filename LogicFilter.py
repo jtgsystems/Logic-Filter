@@ -1,48 +1,12 @@
-# -*- coding: utf-8 -*-
+import customtkinter as ctk
+import logging
+from rich.logging import RichHandler
+import tkinter as tk
+import json
+from tkinter import ttk, filedialog, messagebox
+from datetime import datetime
+import requests
 import sys
-import traceback
-
-try:
-    # Core Python imports
-    import tkinter as tk
-    from tkinter import ttk, filedialog, messagebox
-    from datetime import datetime
-    import json
-    
-    # Third-party imports with error messages
-    try:
-        import customtkinter as ctk
-    except ImportError:
-        print("Error: customtkinter not found. Installing...")
-        import subprocess
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "customtkinter"])
-        import customtkinter as ctk
-        
-    try:
-        import requests
-    except ImportError:
-        print("Error: requests not found. Installing...")
-        import subprocess
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "requests"])
-        import requests
-        
-    try:
-        from rich.logging import RichHandler
-        import logging
-    except ImportError:
-        print("Error: rich not found. Installing...")
-        import subprocess
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "rich"])
-        from rich.logging import RichHandler
-        import logging
-
-except Exception as e:
-    print(f"Critical error during initialization: {e}")
-    print("\nFull traceback:")
-    traceback.print_exc()
-    print("\nPlease ensure all dependencies are installed by running:")
-    print("pip install -r requirements.txt")
-    sys.exit(1)
 
 # Configuration
 OLLAMA_MODELS = {
@@ -241,7 +205,7 @@ def vet_and_refine(improvements, model_name):
                 ),
             }
         ]
-        response = ollama.chat(model_name, messages=messages)
+        response = ollama.chat(model=model_name, messages=messages)
         return response["message"]["content"]
     except Exception as e:
         logger.error(f"Error during vetting: {e}")
@@ -268,7 +232,7 @@ def finalize_prompt(vetting_report, original_prompt, model_name):
                 ),
             }
         ]
-        response = ollama.chat(model_name, messages=messages)
+        response = ollama.chat(model=model_name, messages=messages)
         return response["message"]["content"]
     except Exception as e:
         logger.error(f"Error during finalization: {e}")
@@ -296,7 +260,7 @@ def enhance_prompt(final_prompt, model_name):
                 ),
             }
         ]
-        response = ollama.chat(model_name, messages=messages)
+        response = ollama.chat(model=model_name, messages=messages)
         return response["message"]["content"]
     except Exception as e:
         logger.error(f"Error during enhancement: {e}")
@@ -450,7 +414,7 @@ class LoadingIndicator:
     """Animated loading indicator."""
     def __init__(self, parent):
         self.parent = parent
-        self.frame = ctk.CTkFrame(self.frame)
+        self.frame = ctk.CTkFrame(parent)
         self.progress = ctk.CTkProgressBar(self.frame)
         self.progress.set(0)  # Initialize progress to 0
         self.progress.pack(pady=10, padx=20, fill="x")
@@ -459,7 +423,7 @@ class LoadingIndicator:
         self.frame.pack_forget()
         
     def start(self, progress=0):
-        """Start or update the loading animation."""        
+        """Start or update the loading animation."""
         self.progress.set(progress / 100)
         self.frame.pack(fill="x", pady=10)
         self.parent.update()
@@ -706,7 +670,7 @@ class ProcessingHistory:
         self.max_history = 50
         
     def add(self, input_text, output_text):
-        """Add a new processing result to history."""        
+        """Add a new processing result to history."""
         entry = {
             'input': input_text,
             'output': output_text,
@@ -1084,7 +1048,7 @@ class OutputPane(ctk.CTkFrame):
                 self.find_text()
 
 def main():
-    """Main function."""    
+    """Main function."""
     progress_msgs = PROGRESS_MESSAGES
 
     root = ctk.CTk()
