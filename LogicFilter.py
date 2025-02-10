@@ -330,7 +330,7 @@ def vet_and_refine(improvements, model_name):
                 ),
             }
         ]
-        response = ollama_manager.chat(model=model_name, messages=messages)
+        response = ollama_manager.chat(model_name, messages=messages)
         return response["message"]["content"]
     except Exception as e:
         logger.error(f"Error during vetting: {e}")
@@ -385,7 +385,7 @@ def enhance_prompt(final_prompt, model_name):
                 ),
             }
         ]
-        response = ollama_manager.chat(model=model_name, messages=messages)
+        response = ollama_manager.chat(model_name, messages=messages)
         return response["message"]["content"]
     except Exception as e:
         logger.error(f"Error during enhancement: {e}")
@@ -810,7 +810,7 @@ class MenuManager:
         )
         if file_path:
             with open(file_path, 'w', encoding='utf-8') as f:
-                json.dump(processing_history.history, f, indent=2)
+                json.dump(app_state.processing_history.history, f, indent=2)
                     
     def show_settings(self):
         SettingsDialog(self.root, app_state)
@@ -824,8 +824,8 @@ class MenuManager:
         )
         
     def undo(self):
-        if processing_history and processing_history.can_undo():
-            entry = processing_history.undo()
+        if app_state.processing_history and app_state.processing_history.can_undo():
+            entry = app_state.processing_history.undo()
             if entry and self.input_text and self.output_text:
                 self.input_text.delete("1.0", "end")
                 self.input_text.insert("1.0", entry['input'])
@@ -835,8 +835,8 @@ class MenuManager:
                 self.output_text.configure(state="disabled")
                 
     def redo(self):
-        if processing_history and processing_history.can_redo():
-            entry = processing_history.redo()
+        if app_state.processing_history and app_state.processing_history.can_redo():
+            entry = app_state.processing_history.redo()
             if entry and self.input_text and self.output_text:
                 self.input_text.delete("1.0", "end")
                 self.input_text.insert("1.0", entry['input'])
@@ -1702,6 +1702,37 @@ def main():
         sys.exit(1)
 
 if __name__ == "__main__":
-    import threading  # Add threading import at the top
-    main()
-`
+    try:
+        # Initialize logging first
+        logging.basicConfig(
+            level=logging.INFO,
+            format="%(message)s",
+            datefmt="[%X]",
+            handlers=[RichHandler(rich_tracebacks=True)]
+        )
+        logger = logging.getLogger("prompt_enhancer")
+
+        # Create assets directory if it doesn't exist
+        assets_dir = os.path.join(os.path.dirname(__file__), "assets")
+        if not os.path.exists(assets_dir):
+            os.makedirs(assets_dir)
+        os.environ["CUSTOMTKINTER_IMAGES_PATH"] = assets_dir
+
+        # Initialize customtkinter
+        ctk.set_appearance_mode("dark")
+        ctk.set_default_color_theme("blue")
+
+        # Start the application
+        main()
+    except Exception as e:
+        # If we can show a GUI error, do so
+        try:
+            messagebox.showerror(
+                "Startup Error",
+                f"Failed to start application: {str(e)}\n\n"
+                "Check the logs for more details."
+            )
+        except:
+            # Fall back to console error if GUI isn't available
+            print(f"ERROR: Failed to start application: {str(e)}")
+        sys.exit(1)
