@@ -10,6 +10,7 @@ import requests
 import sys
 import os
 import psutil
+import threading  # Add missing import
 
 # Initialize logging first
 logging.basicConfig(
@@ -712,14 +713,13 @@ class MenuManager:
                     f.write(self.output_text.get("1.0", "end"))
                     
     def export_history(self):
-        if processing_history:
-            file_path = filedialog.asksaveasfilename(
-                defaultextension=".json",
-                filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
-            )
-            if file_path:
-                with open(file_path, 'w', encoding='utf-8') as f:
-                    json.dump(processing_history.history, f, indent=2)
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
+        )
+        if file_path:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(processing_history.history, f, indent=2)
                     
     def show_settings(self):
         SettingsDialog(self.root, settings_manager)
@@ -1433,6 +1433,10 @@ app_state = ApplicationState()
 def main():
     """Main function."""
     try:
+        # Ensure we're running in the main thread
+        if threading.current_thread() is not threading.main_thread():
+            raise RuntimeError("GUI must be started in the main thread")
+            
         # Configure ttk style first
         style = configure_ttk_style()
         
@@ -1444,6 +1448,9 @@ def main():
 
         # Initialize application state
         app_state.initialize(root)
+        
+        # Force the window to update before continuing
+        root.update_idletasks()
         
         # Create main container
         main_frame = ctk.CTkFrame(root)
@@ -1504,30 +1511,26 @@ def main():
                     'geometry': root.geometry(),
                     'zoomed': root.state() == 'zoomed'
                 }
-                with open('window_state.json', 'w') as f:
-                    json.dump(config, f)
+                app_state.settings_manager.update_window_state(
+                    config['geometry'],
+                    config['zoomed']
+                )
 
         # Load previous window state
-        try:
-            with open('window_state.json', 'r') as f):
-                config = json.load(f)
-                if config.get('zoomed'):
-                    root.state('zoomed')
-                else:
-                    root.geometry(config['geometry'])
-        except:
-            pass  # Use default if no saved state
+        window_settings = app_state.settings_manager.get('window', {})
+        if window_settings.get('zoomed'):
+            root.state('zoomed')
+        elif window_settings.get('geometry'):
+            root.geometry(window_settings['geometry'])
 
         root.protocol("WM_DELETE_WINDOW", lambda: [save_window_state(), root.destroy()])
 
         # Set initial theme from settings
         ctk.set_appearance_mode(app_state.settings_manager.get('theme', 'dark'))
 
-        # Create assets directory if it doesn't exist
-        assets_dir = os.path.join(os.path.dirname(__file__), "assets")
-        if not os.path.exists(assets_dir):
-            os.makedirs(assets_dir)
-
+        # Final setup before mainloop
+        root.update_idletasks()
+        
         # Start the application
         root.mainloop()
 
@@ -1537,4 +1540,5 @@ def main():
         sys.exit(1)
 
 if __name__ == "__main__":
+    import threading  # Add threading import at the top
     main()
