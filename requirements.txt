@@ -1,4 +1,7 @@
-ollama
-customtkinter
-ttkthemes
-rich
+ollama>=0.1.17
+customtkinter>=5.2.1
+ttkthemes>=3.2.2
+rich>=13.7.0
+requests>=2.31.0
+typing-extensions>=4.9.0
+pillow>=10.1.0
