@@ -1,0 +1,12 @@
+{
+  "theme": "dark",
+  "font_size": 14,
+  "max_history": 50,
+  "autosave": true,
+  "show_model_indicators": true,
+  "save_window_state": true,
+  "window": {
+    "geometry": "1024x768+499+122",
+    "zoomed": false
+  }
+}
