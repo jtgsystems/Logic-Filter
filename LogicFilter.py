@@ -89,11 +89,17 @@ class OllamaServiceManager:
         self.ollama_ready = False
         self.models_loaded = False
         self.ollama_module = None
+        self._start_service_check()
+        
+    def _start_service_check(self):
+        """Start periodic service checking"""
+        if self.app_state.root:
+            self.app_state.root.after(1000, self.check_service_status)
         
     def check_ollama_service(self):
         """Check if Ollama service is running and accessible."""
         try:
-            response = requests.get("http://localhost:11434/api/health", timeout=5)
+            response = requests.get("http://localhost:11434/api/health", timeout=2)
             return response.status_code == 200
         except requests.exceptions.RequestException:
             return False
@@ -108,14 +114,17 @@ class OllamaServiceManager:
                 self.ollama_ready = True
                 if self.app_state.status_bar:
                     self.app_state.status_bar.set_model_status("Connected")
+                    self.app_state.status_bar.set_status("Ollama service ready")
                 return True
             except ImportError:
                 if self.app_state.status_bar:
-                    self.app_state.status_bar.set_model_status("Ollama module not installed", is_error=True)
+                    self.app_state.status_bar.set_model_status("Not installed", is_error=True)
+                    self.app_state.status_bar.set_status("Please install Ollama", is_error=True)
                 return False
         else:
             if self.app_state.status_bar:
-                self.app_state.status_bar.set_model_status("Service not running", is_error=True)
+                self.app_state.status_bar.set_model_status("Not running", is_error=True)
+                self.app_state.status_bar.set_status("Start Ollama service", is_error=True)
             return False
 
     def check_service_status(self):
@@ -123,12 +132,9 @@ class OllamaServiceManager:
         if not self.ollama_ready:
             if self.initialize_ollama():
                 if self.app_state.status_bar:
-                    self.app_state.status_bar.set_status("Ollama service connected")
-            else:
-                if self.app_state.status_bar:
-                    self.app_state.status_bar.set_status("Waiting for Ollama service...", is_error=True)
+                    self.app_state.status_bar.set_status("Ollama connected")
             
-        # Schedule next check
+        # Schedule next check only if not ready
         if not self.ollama_ready and self.app_state.root:
             self.app_state.root.after(5000, self.check_service_status)
 
@@ -206,8 +212,11 @@ processing_history = None
 def verify_model_availability(model_name):
     """Verify if an Ollama model is available."""
     try:
+        if not app_state.ollama_manager.ollama_ready:
+            return False
+            
         # Try to ping the model with a timeout
-        response = ollama_manager.chat(
+        app_state.ollama_manager.chat(
             model=model_name, 
             messages=[{"role": "user", "content": "test"}],
             options={"timeout": 5000}  # 5 second timeout
@@ -225,6 +234,9 @@ def verify_model_availability(model_name):
 
 def validate_models():
     """Validate all required models are available."""
+    if not app_state.ollama_manager.ollama_ready:
+        return []  # Don't validate if service isn't ready
+        
     unavailable_models = []
     connection_error = None
     
@@ -242,7 +254,6 @@ def validate_models():
         raise OllamaError(connection_error)
         
     return unavailable_models
-
 
 def analyze_prompt(prompt, model_name):
     """Analyzes the initial prompt."""
@@ -686,9 +697,9 @@ class Toolbar(ctk.CTkFrame):
             self.output_text.configure(state="disabled")
             
     def copy_output(self):
-        if self.output_text and root:
-            root.clipboard_clear()
-            root.clipboard_append(self.output_text.get("1.0", "end").strip())
+        if self.output_text and app_state.root:
+            app_state.root.clipboard_clear()
+            app_state.root.clipboard_append(self.output_text.get("1.0", "end").strip())
             
     def save_output(self):
         if self.output_text:
@@ -701,14 +712,14 @@ class Toolbar(ctk.CTkFrame):
                     f.write(self.output_text.get("1.0", "end"))
                     
     def export_history(self):
-        if processing_history:
+        if app_state.processing_history:
             file_path = filedialog.asksaveasfilename(
                 defaultextension=".json",
                 filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
             )
             if file_path:
                 with open(file_path, 'w', encoding='utf-8') as f:
-                    json.dump(processing_history.history, f, indent=2)
+                    json.dump(app_state.processing_history.history, f, indent=2)
 
 def create_toolbar(parent):
     """Create toolbar with common actions."""
@@ -789,7 +800,7 @@ class MenuManager:
                 filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
             )
             if file_path:
-                with open(file_path, 'w', encoding='utf-8') as f):
+                with open(file_path, 'w', encoding='utf-8') as f:
                     f.write(self.output_text.get("1.0", "end"))
                     
     def export_history(self):
@@ -798,11 +809,11 @@ class MenuManager:
             filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
         )
         if file_path:
-            with open(file_path, 'w', encoding='utf-8') as f):
+            with open(file_path, 'w', encoding='utf-8') as f:
                 json.dump(processing_history.history, f, indent=2)
                     
     def show_settings(self):
-        SettingsDialog(self.root, settings_manager)
+        SettingsDialog(self.root, app_state)
         
     def show_about(self):
         messagebox.showinfo(
@@ -955,7 +966,7 @@ def save_output(output_text):
         filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
     )
     if file_path:
-        with open(file_path, 'w', encoding='utf-8') as f):
+        with open(file_path, 'w', encoding='utf-8') as f:
             f.write(output_text.get("1.0", "end"))
             
 def export_history():
@@ -963,8 +974,8 @@ def export_history():
         defaultextension=".json",
         filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
     )
-    if file_path):
-        with open(file_path, 'w', encoding='utf-8') as f):
+    if file_path:
+        with open(file_path, 'w', encoding='utf-8') as f:
             json.dump(app_state.processing_history, f, indent=2)
 
 class ProcessingHistory:
@@ -1035,7 +1046,7 @@ class SettingsManager:
         """Load settings from file."""
         try:
             if os.path.exists(self.settings_file):
-                with open(self.settings_file, 'r') as f):
+                with open(self.settings_file, 'r') as f:
                     loaded = json.load(f)
                     # Merge with defaults to ensure all settings exist
                     return {**self.default_settings, **loaded}
@@ -1047,7 +1058,7 @@ class SettingsManager:
     def save_settings(self):
         """Save current settings to file."""
         try:
-            with open(self.settings_file, 'w') as f):
+            with open(self.settings_file, 'w') as f:
                 json.dump(self.settings, f, indent=2)
         except Exception as e:
             logger.error(f"Failed to save settings: {e}")
@@ -1076,72 +1087,165 @@ class SettingsManager:
 
 class SettingsDialog:
     """Dialog for editing application settings."""
-    def __init__(self, parent, settings_manager):
+    def __init__(self, parent, app_state):
         self.window = ctk.CTkToplevel(parent)
         self.window.title("Settings")
         self.window.geometry("600x400")
-        self.settings = settings_manager
+        self.app_state = app_state
         
         # Make modal
         self.window.transient(parent)
         self.window.grab_set()
         
+        # Center the dialog
+        self.center_window()
+        
         self.create_widgets()
         
+    def center_window(self):
+        """Center the dialog on the parent window."""
+        self.window.update_idletasks()
+        parent = self.window.master
+        x = parent.winfo_x() + (parent.winfo_width() - self.window.winfo_width()) // 2
+        y = parent.winfo_y() + (parent.winfo_height() - self.window.winfo_height()) // 2
+        self.window.geometry(f"+{x}+{y}")
+        
     def create_widgets(self):
+        # Create scrollable frame for settings
+        container = ctk.CTkScrollableFrame(self.window)
+        container.pack(fill="both", expand=True, padx=20, pady=20)
+        
         # Theme selection
-        theme_frame = ctk.CTkFrame(self.window)
-        theme_frame.pack(fill="x", padx=20, pady=10)
+        theme_frame = ctk.CTkFrame(container)
+        theme_frame.pack(fill="x", pady=10)
         
         ctk.CTkLabel(theme_frame, text="Theme:").pack(side="left", padx=5)
-        theme_var = ctk.StringVar(value=self.settings.get('theme'))
+        theme_var = ctk.StringVar(value=self.app_state.settings_manager.get('theme'))
         theme_menu = ctk.CTkOptionMenu(
             theme_frame,
             values=["dark", "light", "system"],
             variable=theme_var,
-            command=lambda t: self.settings.set('theme', t)
+            command=self.on_theme_change
         )
         theme_menu.pack(side="left", padx=5)
         
         # Font size
-        font_frame = ctk.CTkFrame(self.window)
-        font_frame.pack(fill="x", padx=20, pady=10)
+        font_frame = ctk.CTkFrame(container)
+        font_frame.pack(fill="x", pady=10)
         
         ctk.CTkLabel(font_frame, text="Font Size:").pack(side="left", padx=5)
+        self.font_size_label = ctk.CTkLabel(font_frame, text=str(self.app_state.settings_manager.get('font_size')))
+        self.font_size_label.pack(side="right", padx=5)
+        
         font_size = ctk.CTkSlider(
             font_frame,
             from_=8,
             to=24,
             number_of_steps=16,
-            command=lambda v: self.settings.set('font_size', int(v))
+            command=self.on_font_size_change
         )
-        font_size.set(self.settings.get('font_size'))
+        font_size.set(self.app_state.settings_manager.get('font_size'))
         font_size.pack(side="left", padx=5, expand=True, fill="x")
         
         # Checkboxes for boolean settings
-        checks_frame = ctk.CTkFrame(self.window)
-        checks_frame.pack(fill="x", padx=20, pady=10)
+        checks_frame = ctk.CTkFrame(container)
+        checks_frame.pack(fill="x", pady=10)
         
+        self.checkboxes = {}
         for setting, label in [
             ('autosave', "Auto-save settings"),
             ('show_model_indicators', "Show model indicators"),
             ('save_window_state', "Remember window position")
         ]:
-            var = tk.BooleanVar(value=self.settings.get(setting))
+            var = tk.BooleanVar(value=self.app_state.settings_manager.get(setting))
             cb = ctk.CTkCheckBox(
                 checks_frame,
                 text=label,
                 variable=var,
-                command=lambda s=setting, v=var: self.settings.set(s, v.get())
+                command=lambda s=setting, v=var: self.on_checkbox_change(s, v)
             )
             cb.pack(anchor="w", padx=5, pady=2)
+            self.checkboxes[setting] = (cb, var)
             
+        # Status bar
+        self.status_label = ctk.CTkLabel(
+            self.window,
+            text="",
+            text_color="gray"
+        )
+        self.status_label.pack(side="bottom", pady=5)
+            
+        # Buttons frame
+        button_frame = ctk.CTkFrame(self.window)
+        button_frame.pack(side="bottom", fill="x", padx=20, pady=10)
+        
+        # Save button
+        ctk.CTkButton(
+            button_frame,
+            text="Save",
+            command=self.save_settings
+        ).pack(side="left", padx=5)
+        
         # Close button
         ctk.CTkButton(
-            self.window,
+            button_frame,
             text="Close",
             command=self.window.destroy
-        ).pack(side="bottom", pady=10)
+        ).pack(side="right", padx=5)
+        
+    def on_theme_change(self, theme):
+        """Handle theme change"""
+        try:
+            self.app_state.settings_manager.set('theme', theme)
+            ctk.set_appearance_mode(theme)
+            self.show_status("Theme updated")
+        except Exception as e:
+            self.show_status(f"Failed to update theme: {e}", is_error=True)
+            
+    def on_font_size_change(self, value):
+        """Handle font size change"""
+        try:
+            size = int(value)
+            self.app_state.settings_manager.set('font_size', size)
+            self.font_size_label.configure(text=str(size))
+            self.update_font_size(size)
+            self.show_status("Font size updated")
+        except Exception as e:
+            self.show_status(f"Failed to update font size: {e}", is_error=True)
+            
+    def on_checkbox_change(self, setting, var):
+        """Handle checkbox changes"""
+        try:
+            value = var.get()
+            self.app_state.settings_manager.set(setting, value)
+            self.show_status(f"{setting} updated")
+        except Exception as e:
+            self.show_status(f"Failed to update {setting}: {e}", is_error=True)
+            
+    def update_font_size(self, size):
+        """Update font size for text widgets"""
+        try:
+            if self.app_state.input_text:
+                self.app_state.input_text.configure(font=("Arial", size))
+            if self.app_state.output_text:
+                self.app_state.output_text.configure(font=("Arial", size))
+        except Exception as e:
+            self.show_status(f"Failed to apply font size: {e}", is_error=True)
+            
+    def save_settings(self):
+        """Save all settings"""
+        try:
+            self.app_state.settings_manager.save_settings()
+            self.show_status("Settings saved successfully")
+        except Exception as e:
+            self.show_status(f"Failed to save settings: {e}", is_error=True)
+            
+    def show_status(self, message, is_error=False):
+        """Show status message"""
+        self.status_label.configure(
+            text=message,
+            text_color="red" if is_error else "gray"
+        )
 
 class InputPane(ctk.CTkFrame):
     """Enhanced input pane with additional features"""
@@ -1378,9 +1482,10 @@ class OutputPane(ctk.CTkFrame):
 
 def process_prompt():
     """Process the input prompt through the enhancement pipeline."""
+    # First check if Ollama is ready
     if not app_state.ollama_manager.ollama_ready:
         if not app_state.ollama_manager.initialize_ollama():
-            app_state.status_bar.set_status("Ollama service not ready. Please start Ollama.", is_error=True)
+            app_state.status_bar.set_status("Ollama service not ready", is_error=True)
             messagebox.showwarning(
                 "Service Not Ready",
                 "The Ollama service is not running. Please start Ollama and try again.\n\n"
@@ -1389,6 +1494,34 @@ def process_prompt():
             return
 
     try:
+        app_state.status_bar.set_status("Checking models...")
+        app_state.loading.start(0)
+        
+        # Validate models before starting
+        unavailable_models = validate_models()
+        if unavailable_models:
+            error_msg = "Some models are not available. Using fallback models where possible.\n"
+            for purpose, model in unavailable_models:
+                if model in FALLBACK_ORDER:
+                    fallbacks = ", ".join(FALLBACK_ORDER[model])
+                    error_msg += f"- {purpose}: {model} (fallbacks: {fallbacks})\n"
+                else:
+                    error_msg += f"- {purpose}: {model} (no fallbacks available)\n"
+            logger.warning(error_msg)
+            
+            # Show warning to user
+            messagebox.showwarning(
+                "Model Availability",
+                "Some models are not available. The application will use fallback models.\n\n"
+                "This may affect the quality of results."
+            )
+
+        initial_prompt = app_state.input_text.get("1.0", "end").strip()
+        if not initial_prompt:
+            update_output("Error: No prompt entered.", is_error=True)
+            app_state.loading.stop()
+            return
+
         app_state.status_bar.set_status("Processing...")
         progress = ProgressTracker()
         app_state.loading.start(0)
@@ -1571,3 +1704,4 @@ def main():
 if __name__ == "__main__":
     import threading  # Add threading import at the top
     main()
+`
