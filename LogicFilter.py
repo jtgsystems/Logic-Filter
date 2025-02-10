@@ -1,11 +1,19 @@
-import customtkinter as ctk
-import logging
-from rich.logging import RichHandler
-import ollama
-import tkinter as tk
-import json
-from tkinter import ttk, filedialog
-from datetime import datetime
+# -*- coding: utf-8 -*-
+try:
+    import customtkinter as ctk
+    import logging
+    from rich.logging import RichHandler
+    import tkinter as tk
+    import json
+    from tkinter import ttk, filedialog, messagebox
+    from datetime import datetime
+    import requests
+    import sys
+except ImportError as e:
+    print(f"Error importing required module: {e}")
+    print("Please ensure all dependencies are installed by running:")
+    print("pip install -r requirements.txt")
+    sys.exit(1)
 
 # Configuration
 OLLAMA_MODELS = {
@@ -52,6 +60,32 @@ logging.basicConfig(
     handlers=[RichHandler(rich_tracebacks=True)]
 )
 logger = logging.getLogger("prompt_enhancer")
+
+def check_ollama_service():
+    """Check if Ollama service is running and accessible."""
+    try:
+        response = requests.get("http://localhost:11434/api/health", timeout=5)
+        if response.status_code == 200:
+            return True
+    except requests.exceptions.RequestException:
+        return False
+    return False
+
+def ensure_ollama_running():
+    """Ensure Ollama service is running before importing."""
+    if not check_ollama_service():
+        messagebox.showerror(
+            "Ollama Service Not Found",
+            "The Ollama service is not running. Please start Ollama and try again.\n\n"
+            "If Ollama is not installed, visit: https://ollama.com/download"
+        )
+        sys.exit(1)
+
+# Check Ollama service before importing
+ensure_ollama_running()
+
+# Now import ollama after confirming service is running
+import ollama
 
 # Set customtkinter appearance
 ctk.set_appearance_mode("dark")
@@ -396,7 +430,7 @@ class LoadingIndicator:
         self.frame.pack_forget()
         
     def start(self, progress=0):
-        """Start or update the loading animation."""
+        """Start or update the loading animation."""        
         self.progress.set(progress / 100)
         self.frame.pack(fill="x", pady=10)
         self.parent.update()
@@ -643,7 +677,7 @@ class ProcessingHistory:
         self.max_history = 50
         
     def add(self, input_text, output_text):
-        """Add a new processing result to history."""
+        """Add a new processing result to history."""        
         entry = {
             'input': input_text,
             'output': output_text,
@@ -1021,7 +1055,7 @@ class OutputPane(ctk.CTkFrame):
                 self.find_text()
 
 def main():
-    """Main function."""
+    """Main function."""    
     progress_msgs = PROGRESS_MESSAGES
 
     root = ctk.CTk()
