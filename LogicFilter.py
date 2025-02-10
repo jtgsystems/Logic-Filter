@@ -26,27 +26,28 @@ class ApplicationState:
         self.toolbar = None
         self.menu_manager = None
         self.model_indicators = None
+        self.ollama_manager = None
+        self.is_processing = False
         
     def initialize(self, root):
         """Initialize application state with root window"""
         self.root = root
-        from SettingsManager import SettingsManager
-        self.settings_manager = SettingsManager()
         self.processing_history = ProcessingHistory()
+        self.settings_manager = SettingsManager()
         self.ollama_manager = OllamaServiceManager(self)
-
+        
     def reset_indicators(self):
         """Reset all model indicators to inactive state"""
         if self.model_indicators:
             for label in self.model_indicators.values():
                 label.configure(text_color="gray")
-
+                
     def set_active_model(self, model_type):
         """Set a model indicator as active"""
         if self.model_indicators and model_type in self.model_indicators:
             self.reset_indicators()
             self.model_indicators[model_type].configure(text_color="#4a90e2")
-        
+            
     def update_references(self, **kwargs):
         """Update component references"""
         for key, value in kwargs.items():
