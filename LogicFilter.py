@@ -10,7 +10,59 @@ import requests
 import sys
 import os
 import psutil
-import threading  # Add missing import
+import threading
+import asyncio
+
+class ApplicationState:
+    """Global application state manager"""
+    def __init__(self):
+        self.root = None
+        self.input_text = None
+        self.output_text = None
+        self.status_bar = None
+        self.loading = None
+        self.processing_history = None
+        self.settings_manager = None
+        self.toolbar = None
+        self.menu_manager = None
+        self.model_indicators = None
+        
+    def initialize(self, root):
+        """Initialize application state with root window"""
+        self.root = root
+        from SettingsManager import SettingsManager
+        self.settings_manager = SettingsManager()
+        self.processing_history = ProcessingHistory()
+        self.ollama_manager = OllamaServiceManager(self)
+
+    def reset_indicators(self):
+        """Reset all model indicators to inactive state"""
+        if self.model_indicators:
+            for label in self.model_indicators.values():
+                label.configure(text_color="gray")
+
+    def set_active_model(self, model_type):
+        """Set a model indicator as active"""
+        if self.model_indicators and model_type in self.model_indicators:
+            self.reset_indicators()
+            self.model_indicators[model_type].configure(text_color="#4a90e2")
+        
+    def update_references(self, **kwargs):
+        """Update component references"""
+        for key, value in kwargs.items():
+            if hasattr(self, key):
+                setattr(self, key, value)
+                
+        # Update toolbar references if available
+        if self.toolbar and ('input_text' in kwargs or 'output_text' in kwargs):
+            self.toolbar.update_references(self.input_text, self.output_text)
+            
+        # Update menu references if available
+        if self.menu_manager and ('input_text' in kwargs or 'output_text' in kwargs):
+            self.menu_manager.update_references(self.input_text, self.output_text)
+
+# Create global application state
+app_state = ApplicationState()
 
 # Initialize logging first
 logging.basicConfig(
@@ -21,43 +73,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger("prompt_enhancer")
 
-# After logging initialization but before any ollama imports
-def check_ollama_service():
-    """Check if Ollama service is running and accessible."""
-    try:
-        response = requests.get("http://localhost:11434/api/health", timeout=5)
-        return response.status_code == 200
-    except requests.exceptions.RequestException:
-        return False
-
-class InitializationError(Exception):
-    """Custom exception for initialization errors."""
-    pass
-
-def ensure_ollama_running():
-    """Ensure Ollama service is running before importing."""
-    if not check_ollama_service():
-        tk.messagebox.showerror(
-            "Ollama Service Not Found",
-            "The Ollama service is not running. Please start Ollama and try again.\n\n"
-            "If Ollama is not installed, visit: https://ollama.com/download"
-        )
-        raise InitializationError("Ollama service not running")
-
-# Check Ollama service
-try:
-    ensure_ollama_running()
-    import ollama
-except InitializationError:
-    sys.exit(1)
-except ImportError:
-    tk.messagebox.showerror(
-        "Import Error",
-        "Failed to import ollama module. Please ensure it's installed:\n\n"
-        "pip install ollama"
-    )
-    sys.exit(1)
-
 # Initialize customtkinter
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -67,6 +82,71 @@ assets_dir = os.path.join(os.path.dirname(__file__), "assets")
 if not os.path.exists(assets_dir):
     os.makedirs(assets_dir)
 os.environ["CUSTOMTKINTER_IMAGES_PATH"] = assets_dir
+
+class OllamaServiceManager:
+    def __init__(self, app_state):
+        self.app_state = app_state
+        self.ollama_ready = False
+        self.models_loaded = False
+        self.ollama_module = None
+        
+    def check_ollama_service(self):
+        """Check if Ollama service is running and accessible."""
+        try:
+            response = requests.get("http://localhost:11434/api/health", timeout=5)
+            return response.status_code == 200
+        except requests.exceptions.RequestException:
+            return False
+
+    def initialize_ollama(self):
+        """Initialize Ollama service and models"""
+        if self.check_ollama_service():
+            try:
+                if self.ollama_module is None:
+                    import ollama
+                    self.ollama_module = ollama
+                self.ollama_ready = True
+                if self.app_state.status_bar:
+                    self.app_state.status_bar.set_model_status("Connected")
+                return True
+            except ImportError:
+                if self.app_state.status_bar:
+                    self.app_state.status_bar.set_model_status("Ollama module not installed", is_error=True)
+                return False
+        else:
+            if self.app_state.status_bar:
+                self.app_state.status_bar.set_model_status("Service not running", is_error=True)
+            return False
+
+    def check_service_status(self):
+        """Periodically check Ollama service status"""
+        if not self.ollama_ready:
+            if self.initialize_ollama():
+                if self.app_state.status_bar:
+                    self.app_state.status_bar.set_status("Ollama service connected")
+            else:
+                if self.app_state.status_bar:
+                    self.app_state.status_bar.set_status("Waiting for Ollama service...", is_error=True)
+            
+        # Schedule next check
+        if not self.ollama_ready and self.app_state.root:
+            self.app_state.root.after(5000, self.check_service_status)
+
+    def chat(self, *args, **kwargs):
+        """Wrapper for ollama.chat that ensures service is initialized"""
+        if not self.ollama_ready:
+            if not self.initialize_ollama():
+                raise OllamaError("Ollama service not ready")
+        return self.ollama_module.chat(*args, **kwargs)
+
+# Create OllamaError class before it's used
+class OllamaError(Exception):
+    """Custom exception for Ollama-related errors."""
+    pass
+
+# Create global application state
+app_state = ApplicationState()
+ollama_manager = OllamaServiceManager(app_state)
 
 # Configure TTK theme
 def configure_ttk_style():
@@ -127,7 +207,7 @@ def verify_model_availability(model_name):
     """Verify if an Ollama model is available."""
     try:
         # Try to ping the model with a timeout
-        response = ollama.chat(
+        response = ollama_manager.chat(
             model=model_name, 
             messages=[{"role": "user", "content": "test"}],
             options={"timeout": 5000}  # 5 second timeout
@@ -184,7 +264,7 @@ def analyze_prompt(prompt, model_name):
                 ),
             }
         ]
-        response = ollama.chat(model=model_name, messages=messages)
+        response = ollama_manager.chat(model=model_name, messages=messages)
         return response["message"]["content"]
     except Exception as e:
         logger.error(f"Error during analysis: {e}")
@@ -211,7 +291,7 @@ def generate_solutions(analysis, model_name):
                 )
             }
         ]
-        response = ollama.chat(model=model_name, messages=messages)
+        response = ollama_manager.chat(model=model_name, messages=messages)
         return response["message"]["content"]
     except Exception as e:
         logger.error(f"Error during solution generation: {e}")
@@ -239,7 +319,7 @@ def vet_and_refine(improvements, model_name):
                 ),
             }
         ]
-        response = ollama.chat(model=model_name, messages=messages)
+        response = ollama_manager.chat(model=model_name, messages=messages)
         return response["message"]["content"]
     except Exception as e:
         logger.error(f"Error during vetting: {e}")
@@ -266,7 +346,7 @@ def finalize_prompt(vetting_report, original_prompt, model_name):
                 ),
             }
         ]
-        response = ollama.chat(model_name, messages=messages)
+        response = ollama_manager.chat(model_name, messages=messages)
         return response["message"]["content"]
     except Exception as e:
         logger.error(f"Error during finalization: {e}")
@@ -294,7 +374,7 @@ def enhance_prompt(final_prompt, model_name):
                 ),
             }
         ]
-        response = ollama.chat(model=model_name, messages=messages)
+        response = ollama_manager.chat(model=model_name, messages=messages)
         return response["message"]["content"]
     except Exception as e:
         logger.error(f"Error during enhancement: {e}")
@@ -330,7 +410,7 @@ def comprehensive_review(
                 ),
             }
         ]
-        response = ollama.chat(model_name, messages=messages)
+        response = ollama_manager.chat(model_name, messages=messages)
         improved = response["message"]["content"]
 
         # Then use deepseek-r1:14b as final presenter
@@ -355,7 +435,7 @@ def comprehensive_review(
                 ),
             }
         ]
-        response = ollama.chat(model=OLLAMA_MODELS["presenter"], messages=messages)
+        response = ollama_manager.chat(model=OLLAMA_MODELS["presenter"], messages=messages)
         return response["message"]["content"]
     except Exception as e:
         logger.error(f"Error during comprehensive review: {e}")
@@ -709,7 +789,7 @@ class MenuManager:
                 filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
             )
             if file_path:
-                with open(file_path, 'w', encoding='utf-8') as f:
+                with open(file_path, 'w', encoding='utf-8') as f):
                     f.write(self.output_text.get("1.0", "end"))
                     
     def export_history(self):
@@ -718,7 +798,7 @@ class MenuManager:
             filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
         )
         if file_path:
-            with open(file_path, 'w', encoding='utf-8') as f:
+            with open(file_path, 'w', encoding='utf-8') as f):
                 json.dump(processing_history.history, f, indent=2)
                     
     def show_settings(self):
@@ -875,7 +955,7 @@ def save_output(output_text):
         filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
     )
     if file_path:
-        with open(file_path, 'w', encoding='utf-8') as f:
+        with open(file_path, 'w', encoding='utf-8') as f):
             f.write(output_text.get("1.0", "end"))
             
 def export_history():
@@ -883,8 +963,8 @@ def export_history():
         defaultextension=".json",
         filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
     )
-    if file_path:
-        with open(file_path, 'w', encoding='utf-8') as f:
+    if file_path):
+        with open(file_path, 'w', encoding='utf-8') as f):
             json.dump(app_state.processing_history, f, indent=2)
 
 class ProcessingHistory:
@@ -955,7 +1035,7 @@ class SettingsManager:
         """Load settings from file."""
         try:
             if os.path.exists(self.settings_file):
-                with open(self.settings_file, 'r') as f:
+                with open(self.settings_file, 'r') as f):
                     loaded = json.load(f)
                     # Merge with defaults to ensure all settings exist
                     return {**self.default_settings, **loaded}
@@ -967,7 +1047,7 @@ class SettingsManager:
     def save_settings(self):
         """Save current settings to file."""
         try:
-            with open(self.settings_file, 'w') as f:
+            with open(self.settings_file, 'w') as f):
                 json.dump(self.settings, f, indent=2)
         except Exception as e:
             logger.error(f"Failed to save settings: {e}")
@@ -1298,26 +1378,24 @@ class OutputPane(ctk.CTkFrame):
 
 def process_prompt():
     """Process the input prompt through the enhancement pipeline."""
+    if not app_state.ollama_manager.ollama_ready:
+        if not app_state.ollama_manager.initialize_ollama():
+            app_state.status_bar.set_status("Ollama service not ready. Please start Ollama.", is_error=True)
+            messagebox.showwarning(
+                "Service Not Ready",
+                "The Ollama service is not running. Please start Ollama and try again.\n\n"
+                "If Ollama is not installed, visit: https://ollama.com/download"
+            )
+            return
+
     try:
         app_state.status_bar.set_status("Processing...")
         progress = ProgressTracker()
         app_state.loading.start(0)
         
-        # Validate models before starting
-        unavailable_models = validate_models()
-        if unavailable_models:
-            error_msg = "Some models are not available. Using fallback models where possible.\n"
-            for purpose, model in unavailable_models:
-                if model in FALLBACK_ORDER:
-                    fallbacks = ", ".join(FALLBACK_ORDER[model])
-                    error_msg += f"- {purpose}: {model} (fallbacks: {fallbacks})\n"
-                else:
-                    error_msg += f"- {purpose}: {model} (no fallbacks available)\n"
-            logger.warning(error_msg)
-
         initial_prompt = app_state.input_text.get("1.0", "end").strip()
         if not initial_prompt:
-            update_output("Error: No prompt entered.")
+            update_output("Error: No prompt entered.", is_error=True)
             app_state.loading.stop()
             return
 
@@ -1367,7 +1445,7 @@ def process_prompt():
 
             except Exception as e:
                 error_msg = handle_phase_error(phase_name, e, progress, app_state.loading, output)
-                update_output(output + error_msg)
+                update_output(output + error_msg, is_error=True)
                 return
 
         # Add to history
@@ -1375,60 +1453,11 @@ def process_prompt():
         
     except Exception as e:
         logger.exception("Error during prompt processing")
-        update_output(f"An error occurred: {str(e)}")
+        update_output(f"An error occurred: {str(e)}", is_error=True)
     finally:
         app_state.status_bar.set_status("Ready")
         app_state.loading.stop()
         app_state.root.update()
-
-class ApplicationState:
-    """Global application state manager"""
-    def __init__(self):
-        self.root = None
-        self.input_text = None
-        self.output_text = None
-        self.status_bar = None
-        self.loading = None
-        self.processing_history = None
-        self.settings_manager = None
-        self.toolbar = None
-        self.menu_manager = None
-        self.model_indicators = None  # Add model indicators reference
-        
-    def initialize(self, root):
-        """Initialize application state with root window"""
-        self.root = root
-        self.settings_manager = SettingsManager()
-        self.processing_history = ProcessingHistory()
-
-    def reset_indicators(self):
-        """Reset all model indicators to inactive state"""
-        if self.model_indicators:
-            for label in self.model_indicators.values():
-                label.configure(text_color="gray")
-
-    def set_active_model(self, model_type):
-        """Set a model indicator as active"""
-        if self.model_indicators and model_type in self.model_indicators:
-            self.reset_indicators()
-            self.model_indicators[model_type].configure(text_color="#4a90e2")
-        
-    def update_references(self, **kwargs):
-        """Update component references"""
-        for key, value in kwargs.items():
-            if hasattr(self, key):
-                setattr(self, key, value)
-                
-        # Update toolbar references if available
-        if self.toolbar and ('input_text' in kwargs or 'output_text' in kwargs):
-            self.toolbar.update_references(self.input_text, self.output_text)
-            
-        # Update menu references if available
-        if self.menu_manager and ('input_text' in kwargs or 'output_text' in kwargs):
-            self.menu_manager.update_references(self.input_text, self.output_text)
-
-# Create global application state
-app_state = ApplicationState()
 
 def main():
     """Main function."""
