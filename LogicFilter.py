@@ -1369,13 +1369,14 @@ class SettingsDialog:
         )
 
 class InputPane(ctk.CTkFrame):
-    """Enhanced input pane with additional features"""
-    def __init__(self, parent, *args, **kwargs):
-        super().__init__(parent, *args, **kwargs)
+    """Enhanced input pane with template support"""
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.after_id = None
         self.setup_ui()
         
     def setup_ui(self):
-        # Template selector
+        # Template selector frame
         template_frame = ctk.CTkFrame(self)
         template_frame.pack(fill="x", pady=(0, 10))
         
@@ -1415,6 +1416,7 @@ class InputPane(ctk.CTkFrame):
             border_width=0
         )
         self.line_numbers.pack(side="left", fill="y")
+        self.line_numbers.configure(state="disabled")
         
         self.text = ctk.CTkTextbox(
             self.input_frame,
@@ -1423,19 +1425,24 @@ class InputPane(ctk.CTkFrame):
         )
         self.text.pack(side="left", fill="both", expand=True)
         
-        # Bind events
+        # Bind events with debouncing
         self.text.bind("<<Modified>>", self.on_text_change)
-        self.text.bind("<Key>", self.update_line_numbers)
+        self.text.bind("<Key>", self.schedule_line_numbers_update)
         
     def on_text_change(self, event=None):
-        """Handle text changes"""
+        """Handle text changes with debouncing"""
         content = self.text.get("1.0", "end-1c")
         char_count = len(content)
         self.char_count.configure(text=f"Characters: {char_count}")
-        self.update_line_numbers()
         self.text.edit_modified(False)
         
-    def update_line_numbers(self, event=None):
+    def schedule_line_numbers_update(self, event=None):
+        """Schedule line numbers update with debouncing"""
+        if self.after_id:
+            self.after_cancel(self.after_id)
+        self.after_id = self.after(100, self.update_line_numbers)
+        
+    def update_line_numbers(self):
         """Update line numbers display"""
         content = self.text.get("1.0", "end-1c")
         lines = content.count("\n") + 1
@@ -1458,11 +1465,13 @@ class InputPane(ctk.CTkFrame):
         if template_name != "None":
             self.text.delete("1.0", "end")
             self.text.insert("1.0", templates.get(template_name, ""))
+            self.update_line_numbers()
 
 class OutputPane(ctk.CTkFrame):
-    """Enhanced output pane with additional features"""
-    def __init__(self, parent, *args, **kwargs):
-        super().__init__(parent, *args, **kwargs)
+    """Enhanced output pane with search and format options"""
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.last_search_pos = "1.0"
         self.setup_ui()
         
     def setup_ui(self):
@@ -1510,7 +1519,7 @@ class OutputPane(ctk.CTkFrame):
             search_frame,
             text="Find",
             width=60,
-            command=self.find_text
+            command=lambda: self.find_text()
         ).pack(side="left", padx=5)
         
         ctk.CTkButton(
@@ -1531,29 +1540,37 @@ class OutputPane(ctk.CTkFrame):
         
         # Bind events
         self.search_entry.bind("<Return>", lambda e: self.find_text())
+        self.text.bind("<<Modified>>", self.update_counts)
         
     def format_output(self, format_type):
         """Format the output text based on selected format"""
-        if self.text.get("1.0", "end-1c").strip():
-            content = self.text.get("1.0", "end-1c")
-            self.text.configure(state="normal")
-            self.text.delete("1.0", "end")
+        if not self.text.get("1.0", "end-1c").strip():
+            return
             
+        content = self.text.get("1.0", "end-1c")
+        self.text.configure(state="normal")
+        self.text.delete("1.0", "end")
+        
+        try:
             if format_type == "Code":
                 content = "```\n" + content + "\n```"
             elif format_type == "JSON":
-                try:
-                    parsed = json.loads(content)
-                    content = json.dumps(parsed, indent=2)
-                except:
-                    pass
-                    
+                parsed = json.loads(content)
+                content = json.dumps(parsed, indent=2)
+                
             self.text.insert("1.0", content)
-            self.text.configure(state="disabled")
-            self.update_counts()
+        except Exception as e:
+            logger.error(f"Format error: {e}")
+            self.text.insert("1.0", content)
             
-    def update_counts(self):
+        self.text.configure(state="disabled")
+        self.update_counts()
+        
+    def update_counts(self, event=None):
         """Update word and character counts"""
+        if event:
+            self.text.edit_modified(False)
+            
         content = self.text.get("1.0", "end-1c")
         words = len(content.split())
         chars = len(content)
@@ -1562,156 +1579,149 @@ class OutputPane(ctk.CTkFrame):
         )
         
     def find_text(self, backwards=False):
-        """Search for text in output"""
+        """Search for text in output with wraparound"""
         search_text = self.search_entry.get()
         if not search_text:
             return
             
-        content = self.text.get("1.0", "end-1c")
-        current_pos = self.text.index("insert")
-        
+        start_pos = self.text.index("insert")
         if backwards:
-            search_pos = self.text.search(
+            pos = self.text.search(
                 search_text,
-                current_pos,
+                start_pos,
                 backwards=True,
                 stopindex="1.0"
             )
         else:
-            search_pos = self.text.search(
+            pos = self.text.search(
                 search_text,
-                current_pos,
+                start_pos,
                 stopindex="end"
             )
             
-        if search_pos:
-            line, char = map(int, search_pos.split('.'))
+        if pos:
+            line, char = map(int, pos.split('.'))
+            end_pos = f"{line}.{char + len(search_text)}"
+            
             self.text.tag_remove("search", "1.0", "end")
-            self.text.tag_add(
-                "search",
-                search_pos,
-                f"{line}.{char + len(search_text)}"
-            )
+            self.text.tag_add("search", pos, end_pos)
             self.text.tag_configure("search", background="yellow")
-            self.text.see(search_pos)
-            self.text.mark_set("insert", search_pos)
-        else:
+            self.text.see(pos)
+            self.text.mark_set("insert", pos)
+            
+        elif not backwards:
             # Start from beginning if not found
-            if not backwards:
-                self.text.mark_set("insert", "1.0")
-                self.find_text()
+            self.text.mark_set("insert", "1.0")
+            self.find_text()
+        else:
+            # Start from end if not found
+            self.text.mark_set("insert", "end")
+            self.find_text(backwards=True)
 
 def process_prompt():
     """Process the input prompt through the enhancement pipeline."""
-    # First check if Ollama is ready
-    if not app_state.ollama_manager.ollama_ready:
-        if not app_state.ollama_manager.initialize_ollama():
-            app_state.status_bar.set_status("Ollama service not ready", is_error=True)
-            messagebox.showwarning(
-                "Service Not Ready",
-                "The Ollama service is not running. Please start Ollama and try again.\n\n"
-                "If Ollama is not installed, visit: https://ollama.com/download"
-            )
-            return
-
-    try:
-        app_state.status_bar.set_status("Checking models...")
-        app_state.loading.start(0)
+    if app_state.is_processing:
+        messagebox.showwarning(
+            "Processing in Progress",
+            "Please wait for the current process to complete."
+        )
+        return
         
-        # Validate models before starting
-        unavailable_models = validate_models()
-        if unavailable_models:
-            error_msg = "Some models are not available. Using fallback models where possible.\n"
-            for purpose, model in unavailable_models:
-                if model in FALLBACK_ORDER:
-                    fallbacks = ", ".join(FALLBACK_ORDER[model])
-                    error_msg += f"- {purpose}: {model} (fallbacks: {fallbacks})\n"
-                else:
-                    error_msg += f"- {purpose}: {model} (no fallbacks available)\n"
-            logger.warning(error_msg)
+    app_state.is_processing = True
+    
+    def run_processing():
+        try:
+            if not app_state.ollama_manager.ollama_ready:
+                if not app_state.ollama_manager.initialize_ollama():
+                    app_state.status_bar.set_status("Ollama service not ready", is_error=True)
+                    messagebox.showwarning(
+                        "Service Not Ready",
+                        "The Ollama service is not running. Please start Ollama and try again.\n\n"
+                        "If Ollama is not installed, visit: https://ollama.com/download"
+                    )
+                    return
+
+            app_state.status_bar.set_status("Processing...")
+            progress = ProgressTracker()
+            app_state.loading.start(0)
             
-            # Show warning to user
-            messagebox.showwarning(
-                "Model Availability",
-                "Some models are not available. The application will use fallback models.\n\n"
-                "This may affect the quality of results."
-            )
-
-        initial_prompt = app_state.input_text.get("1.0", "end").strip()
-        if not initial_prompt:
-            update_output("Error: No prompt entered.", is_error=True)
-            app_state.loading.stop()
-            return
-
-        app_state.status_bar.set_status("Processing...")
-        progress = ProgressTracker()
-        app_state.loading.start(0)
-        
-        initial_prompt = app_state.input_text.get("1.0", "end").strip()
-        if not initial_prompt:
-            update_output("Error: No prompt entered.", is_error=True)
-            app_state.loading.stop()
-            return
-
-        output = PROGRESS_MESSAGES["start"]
-        update_output(output)
-
-        # Store results between phases
-        results = {}
-
-        # Process through each phase
-        phases = [
-            ("Analysis", "analyzing", analyze_prompt, "analysis", [lambda: initial_prompt]),
-            ("Generation", "generating", generate_solutions, "generation", [lambda: results["Analysis"]]),
-            ("Vetting", "vetting", vet_and_refine, "vetting", [lambda: results["Generation"]]),
-            ("Finalization", "finalizing", finalize_prompt, "finalization", [lambda: results["Vetting"], lambda: initial_prompt]),
-            ("Enhancement", "enhancing", enhance_prompt, "enhancement", [lambda: results["Finalization"]]),
-            ("Review", "comprehensive", comprehensive_review, "comprehensive", [
-                lambda: initial_prompt,
-                lambda: results["Analysis"],
-                lambda: results["Generation"],
-                lambda: results["Vetting"],
-                lambda: results["Finalization"],
-                lambda: results["Enhancement"]
-            ])
-        ]
-
-        for phase_name, msg_key, func, model_key, arg_providers in phases:
-            app_state.status_bar.set_status(f"Running {phase_name}...")
-            app_state.loading.update_label(f"Running {phase_name}...")
-            output += PROGRESS_MESSAGES[msg_key]
-            update_output(output)
-
-            try:
-                # Get arguments for this phase
-                args = [provider() for provider in arg_providers]
-                args.append(OLLAMA_MODELS[model_key])  # Add model name as last argument
-                
-                # Run the phase
-                result = retry_with_fallback(func, *args)
-                results[phase_name] = result
-
-                progress.update(phase_name)
-                output += PROGRESS_MESSAGES[msg_key.replace("ing", "_done")]
-                output += result + "\n\n"
-                update_output(output)
-                app_state.loading.start(progress.get_progress())
-
-            except Exception as e:
-                error_msg = handle_phase_error(phase_name, e, progress, app_state.loading, output)
-                update_output(output + error_msg, is_error=True)
+            initial_prompt = app_state.input_text.get("1.0", "end").strip()
+            if not initial_prompt:
+                update_output("Error: No prompt entered.", is_error=True)
+                app_state.loading.stop()
                 return
 
-        # Add to history
-        app_state.processing_history.add(initial_prompt, output)
-        
-    except Exception as e:
-        logger.exception("Error during prompt processing")
-        update_output(f"An error occurred: {str(e)}", is_error=True)
-    finally:
-        app_state.status_bar.set_status("Ready")
-        app_state.loading.stop()
-        app_state.root.update()
+            output = PROGRESS_MESSAGES["start"]
+            update_output(output)
+
+            # Store results between phases
+            results = {}
+            
+            # Process through each phase with UI updates
+            phases = [
+                ("Analysis", "analyzing", analyze_prompt, "analysis", [lambda: initial_prompt]),
+                ("Generation", "generating", generate_solutions, "generation", [lambda: results["Analysis"]]),
+                ("Vetting", "vetting", vet_and_refine, "vetting", [lambda: results["Generation"]]),
+                ("Finalization", "finalizing", finalize_prompt, "finalization", [lambda: results["Vetting"], lambda: initial_prompt]),
+                ("Enhancement", "enhancing", enhance_prompt, "enhancement", [lambda: results["Finalization"]]),
+                ("Review", "comprehensive", comprehensive_review, "comprehensive", [
+                    lambda: initial_prompt,
+                    lambda: results["Analysis"],
+                    lambda: results["Generation"],
+                    lambda: results["Vetting"],
+                    lambda: results["Finalization"],
+                    lambda: results["Enhancement"]
+                ])
+            ]
+
+            for phase_name, msg_key, func, model_key, arg_providers in phases:
+                # Update UI in main thread
+                app_state.root.after(0, lambda s=f"Running {phase_name}...": app_state.status_bar.set_status(s))
+                app_state.root.after(0, lambda s=s: app_state.loading.update_label(s))
+                
+                output += PROGRESS_MESSAGES[msg_key]
+                app_state.root.after(0, lambda o=output: update_output(o))
+
+                try:
+                    # Get arguments for this phase
+                    args = [provider() for provider in arg_providers]
+                    args.append(OLLAMA_MODELS[model_key])
+                    
+                    # Set active model indicator
+                    app_state.root.after(0, lambda m=model_key: app_state.set_active_model(m))
+                    
+                    # Run the phase
+                    result = retry_with_fallback(func, *args)
+                    results[phase_name] = result
+
+                    progress.update(phase_name)
+                    output += PROGRESS_MESSAGES[msg_key.replace("ing", "_done")]
+                    output += result + "\n\n"
+                    
+                    # Update UI in main thread
+                    app_state.root.after(0, lambda o=output: update_output(o))
+                    app_state.root.after(0, lambda p=progress.get_progress(): app_state.loading.start(p))
+
+                except Exception as e:
+                    error_msg = handle_phase_error(phase_name, e, progress, app_state.loading, output)
+                    app_state.root.after(0, lambda m=error_msg: update_output(m, is_error=True))
+                    return
+
+            # Add to history
+            app_state.processing_history.add(initial_prompt, output)
+            
+        except Exception as e:
+            logger.exception("Error during prompt processing")
+            app_state.root.after(0, lambda e=e: update_output(f"An error occurred: {str(e)}", is_error=True))
+        finally:
+            app_state.root.after(0, lambda: app_state.status_bar.set_status("Ready"))
+            app_state.root.after(0, app_state.loading.stop)
+            app_state.is_processing = False
+
+    # Run processing in a separate thread
+    processing_thread = threading.Thread(target=run_processing)
+    processing_thread.daemon = True
+    processing_thread.start()
 
 def main():
     """Main function."""
