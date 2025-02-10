@@ -326,7 +326,7 @@ def generate_solutions(analysis, model_name):
                 )
             }
         ]
-        response = ollama_manager.chat(model=model_name, messages=messages)
+        response = ollama_manager.chat(model_name, messages=messages)
         return response["message"]["content"]
     except Exception as e:
         logger.error(f"Error during solution generation: {e}")
@@ -545,66 +545,117 @@ def retry_with_fallback(func, *args, max_retries=3, fallback_model=None):
     raise OllamaError(f"Operation failed after all attempts: {str(last_error)}")
 
 class ProgressTracker:
-    """Tracks progress through the enhancement pipeline."""
-    def __init__(self, total_steps=6):
-        self.total_steps = total_steps
-        self.current_step = 0
-        self.steps_completed = set()
+    """Tracks progress through processing phases"""
+    def __init__(self):
+        self.phases = {
+            "Analysis": 0,
+            "Generation": 20,
+            "Vetting": 40,
+            "Finalization": 60,
+            "Enhancement": 80,
+            "Review": 100
+        }
+        self.current_phase = None
         
-    def update(self, step_name):
-        """Update progress for a step."""
-        if step_name not in self.steps_completed:
-            self.current_step += 1
-            self.steps_completed.add(step_name)
-        
+    def update(self, phase):
+        """Update progress to specified phase"""
+        if phase in self.phases:
+            self.current_phase = phase
+            return self.get_progress()
+            
     def get_progress(self):
-        """Get current progress as percentage."""
-        return (self.current_step / self.total_steps) * 100
+        """Get current progress percentage"""
+        return self.phases.get(self.current_phase, 0)
 
 class LoadingIndicator:
-    """Animated loading indicator."""
+    """Animated loading indicator with improved performance"""
     def __init__(self, parent):
         self.parent = parent
-        self.frame = ctk.CTkFrame(self.parent)
+        self.frame = ctk.CTkFrame(parent)
+        self._progress_value = 0
+        self._animation_after = None
+        self._animation_speed = 50  # milliseconds per update
+        
         self.progress = ctk.CTkProgressBar(self.frame)
-        self.progress.set(0)  # Initialize progress to 0
+        self.progress.set(0)
         self.progress.pack(pady=10, padx=20, fill="x")
+        
         self.label = ctk.CTkLabel(self.frame, text="Processing...")
         self.label.pack(pady=5)
+        
         self.frame.pack_forget()
         
     def start(self, progress=0):
-        """Start or update the loading animation."""
-        self.progress.set(progress / 100)
+        """Start or update the loading animation"""
+        self._progress_value = progress / 100
+        self.progress.set(self._progress_value)
         self.frame.pack(fill="x", pady=10)
-        self.parent.update()
+        self._start_animation()
+        self.parent.update_idletasks()
+        
+    def _start_animation(self):
+        """Start the progress bar animation"""
+        if self._animation_after:
+            self.parent.after_cancel(self._animation_after)
+            
+        def animate():
+            if not self.frame.winfo_ismapped():
+                return
+                
+            # Add a small amount to progress for animation effect
+            current = self.progress.get()
+            target = min(self._progress_value + 0.1, 1.0)
+            if current < target:
+                self.progress.set(current + 0.01)
+                self._animation_after = self.parent.after(self._animation_speed, animate)
+            else:
+                self.progress.set(self._progress_value)
+                
+        self._animation_after = self.parent.after(0, animate)
         
     def stop(self):
-        """Stop the loading animation."""
+        """Stop the loading animation"""
+        if self._animation_after:
+            self.parent.after_cancel(self._animation_after)
+            self._animation_after = None
         self.frame.pack_forget()
-        self.parent.update()
+        self.parent.update_idletasks()
         
     def update_label(self, text):
-        """Update the loading indicator label."""
+        """Update the loading indicator label"""
         self.label.configure(text=text)
-        self.parent.update()
+        self.parent.update_idletasks()
+        
+    def destroy(self):
+        """Clean up resources"""
+        if self._animation_after:
+            self.parent.after_cancel(self._animation_after)
+        self.frame.destroy()
 
 class ThemeManager:
-    """Manages application themes."""
-    THEMES = ["dark", "light", "system"]
-    
+    """Manages application theming"""
     @staticmethod
     def toggle_theme():
+        """Toggle between light and dark themes"""
         current = ctk.get_appearance_mode().lower()
-        idx = (ThemeManager.THEMES.index(current) + 1) % len(ThemeManager.THEMES)
-        new_theme = ThemeManager.THEMES[idx]
+        new_theme = "light" if current == "dark" else "dark"
         ctk.set_appearance_mode(new_theme)
-        return new_theme
+        return new_theme.capitalize()
+        
+    @staticmethod
+    def apply_theme(theme_name):
+        """Apply a specific theme"""
+        ctk.set_appearance_mode(theme_name)
+        return theme_name.capitalize()
 
 class StatusBar(ctk.CTkFrame):
-    """Enhanced status bar with multiple indicators"""
+    """Enhanced status bar with multiple indicators and throttled updates"""
     def __init__(self, parent, *args, **kwargs):
         super().__init__(parent, *args, **kwargs)
+        self._update_timer = None
+        self._memory_update_after = None
+        self._last_memory_update = 0
+        self._memory_update_interval = 15000  # 15 seconds
         self.setup_indicators()
         
     def setup_indicators(self):
@@ -621,7 +672,7 @@ class StatusBar(ctk.CTkFrame):
         # Model status
         self.model_status = ctk.CTkLabel(
             self,
-            text="Models: Ready",
+            text="Models: Checking...",
             text_color="gray"
         )
         self.model_status.pack(side="left", padx=20)
@@ -637,25 +688,39 @@ class StatusBar(ctk.CTkFrame):
         # Memory usage
         self.memory_label = ctk.CTkLabel(
             self,
-            text="Memory: 0MB",
+            text="Memory: --",
             text_color="gray"
         )
         self.memory_label.pack(side="right", padx=20)
         
-        # Start memory monitoring
-        self.update_memory_usage()
+        # Start memory monitoring with throttling
+        self._schedule_memory_update()
         
     def toggle_theme(self):
         current = ctk.get_appearance_mode().lower()
         new_theme = ThemeManager.toggle_theme()
         self.theme_btn.configure(text=f"Theme: {new_theme}")
         
-    def update_memory_usage(self):
+    def _schedule_memory_update(self):
+        """Schedule the next memory update with throttling"""
+        current_time = time.time() * 1000
+        if current_time - self._last_memory_update >= self._memory_update_interval:
+            self._update_memory()
+            self._last_memory_update = current_time
+            
+        # Schedule next update
+        if self._memory_update_after:
+            self.after_cancel(self._memory_update_after)
+        self._memory_update_after = self.after(self._memory_update_interval, self._schedule_memory_update)
+        
+    def _update_memory(self):
         """Update memory usage indicator"""
-        process = psutil.Process()
-        memory_mb = process.memory_info().rss / 1024 / 1024
-        self.memory_label.configure(text=f"Memory: {memory_mb:.1f}MB")
-        self.after(5000, self.update_memory_usage)  # Update every 5 seconds
+        try:
+            process = psutil.Process()
+            memory_mb = process.memory_info().rss / 1024 / 1024
+            self.memory_label.configure(text=f"Memory: {memory_mb:.1f}MB")
+        except Exception as e:
+            logger.error(f"Failed to update memory usage: {e}")
         
     def set_model_status(self, status, is_error=False):
         """Update model status indicator"""
@@ -670,6 +735,12 @@ class StatusBar(ctk.CTkFrame):
             text=text,
             text_color="red" if is_error else "gray"
         )
+        
+    def destroy(self):
+        """Clean up timers before destroying"""
+        if self._memory_update_after:
+            self.after_cancel(self._memory_update_after)
+        super().destroy()
 
 def create_status_bar(parent):
     """Create status bar with theme toggle and connection status."""
@@ -874,19 +945,21 @@ def create_menu(root, input_text=None, output_text=None):
     return MenuManager(root, input_text, output_text)
 
 def sanitize_output(text):
-    """Sanitize and clean up the model output."""
+    """Sanitize and clean up the model output"""
     if not text:
         return ""
         
     # Remove common formatting artifacts
-    text = text.replace("```", "").replace("**", "").replace("#", "")
+    text = text.replace("```", "").replace("**", "")
+    text = text.replace("#", "").replace("`", "")
     
-    # Remove any meta instructions that might have leaked through
+    # Clean meta instructions
     if "PRESENT TO USER:" in text:
         text = text.split("PRESENT TO USER:", 1)[1]
         
-    # Clean up excessive newlines
-    text = "\n".join(line.strip() for line in text.splitlines() if line.strip())
+    # Clean up whitespace
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    text = "\n".join(lines)
     
     return text.strip()
 
@@ -901,12 +974,16 @@ class OutputHandler:
         try:
             text_widget.configure(state="normal")
             text_widget.delete("1.0", "end")
+            text = sanitize_output(text)
             text_widget.insert("end", text)
-            text_widget.configure(state="disabled")
-            text_widget.see("end")
+            
             if is_error:
                 text_widget.tag_add("error", "1.0", "end")
                 text_widget.tag_configure("error", foreground="red")
+                
+            text_widget.configure(state="disabled")
+            text_widget.see("end")
+            
         except Exception as e:
             logger.error(f"Failed to update output: {e}")
 
@@ -926,22 +1003,22 @@ def update_output(text, is_error=False):
             app_state.status_bar.set_status("Error updating output", is_error=True)
 
 def handle_phase_error(phase_name, error, progress_tracker, loading, current_output):
-    """Handle errors during any processing phase."""
-    error_msg = f"Error during {phase_name}: {str(error)}"
-    logger.error(error_msg)
+    """Handle errors during processing phases"""
+    error_msg = f"\nError in {phase_name} phase: {str(error)}\n"
+    logger.error(f"{phase_name} phase error: {error}")
     
-    # Check if we can continue with fallback
-    if isinstance(error, OllamaError) and "Cannot connect" in str(error):
-        return f"Error: Cannot connect to Ollama service. Please ensure Ollama is running.\n\n"
-    
-    # For other errors, try to provide helpful context
-    if phase_name == "analysis":
-        return f"Error: Initial analysis failed - {str(error)}\nPlease try again or enter a simpler prompt.\n\n"
-    elif "timeout" in str(error).lower():
-        return f"Error: {phase_name} timed out. The model may be busy, please try again.\n\n"
-    
-    # Generic error with recovery suggestion
-    return f"Error in {phase_name}: {str(error)}\nPartial results preserved:\n\n{current_output}\n"
+    if "timeout" in str(error).lower():
+        error_msg += "\nThe model took too long to respond. Please try again."
+    elif isinstance(error, OllamaError):
+        error_msg += "\nPlease ensure Ollama is running and try again."
+    else:
+        error_msg += f"\nUnexpected error. Check the logs for details."
+        
+    if current_output:
+        error_msg = f"{current_output}\n{error_msg}"
+        
+    loading.stop()
+    return error_msg
 
 def reset_ui_state():
     """Reset UI state after processing."""
@@ -1003,49 +1080,69 @@ def export_history():
             json.dump(app_state.processing_history, f, indent=2)
 
 class ProcessingHistory:
-    """Manages processing history and undo/redo functionality."""
+    """Manages processing history and undo/redo functionality"""
     def __init__(self):
         self.history = []
         self.current_index = -1
         self.max_history = 50
+        self._lock = threading.Lock()
         
     def add(self, input_text, output_text):
-        """Add a new processing result to history."""
-        entry = {
-            'input': input_text,
-            'output': output_text,
-            'timestamp': datetime.now().isoformat()
-        }
-        
-        # Remove any redo entries
-        self.history = self.history[:self.current_index + 1]
-        self.history.append(entry)
-        self.current_index += 1
-        
-        # Trim history if too long
-        if len(self.history) > self.max_history:
-            self.history = self.history[-self.max_history:]
-            self.current_index = len(self.history) - 1
+        """Add a new processing result to history thread-safely"""
+        with self._lock:
+            # Remove any redo entries
+            self.history = self.history[:self.current_index + 1]
             
+            entry = {
+                'input': input_text,
+                'output': output_text,
+                'timestamp': datetime.now().isoformat()
+            }
+            
+            self.history.append(entry)
+            self.current_index += 1
+            
+            # Trim history if too long
+            if len(self.history) > self.max_history:
+                self.history = self.history[-self.max_history:]
+                self.current_index = len(self.history) - 1
+                
     def can_undo(self):
+        """Check if undo is available"""
         return self.current_index > 0
         
     def can_redo(self):
+        """Check if redo is available"""
         return self.current_index < len(self.history) - 1
         
     def undo(self):
-        """Get previous processing result."""
-        if self.can_undo():
-            self.current_index -= 1
-            return self.history[self.current_index]
-        return None
+        """Get previous processing result"""
+        with self._lock:
+            if self.can_undo():
+                self.current_index -= 1
+                return self.history[self.current_index]
+            return None
         
     def redo(self):
-        """Get next processing result."""
-        if self.can_redo():
-            self.current_index += 1
-            return self.history[self.current_index]
-        return None
+        """Get next processing result"""
+        with self._lock:
+            if self.can_redo():
+                self.current_index += 1
+                return self.history[self.current_index]
+            return None
+            
+    def get_current(self):
+        """Get current history entry"""
+        with self._lock:
+            if 0 <= self.current_index < len(self.history):
+                return self.history[self.current_index]
+            return None
+            
+    def clear(self):
+        """Clear history"""
+        with self._lock:
+            self.history = []
+            self.current_index = -1
 
 class SettingsManager:
     """Manages application settings."""
