@@ -1,16 +1,34 @@
 import tkinter as tk
 import logging
+import os
+import threading
 from rich.logging import RichHandler
 import customtkinter as ctk
-import os
+from typing import Dict, List, Optional
 
 from settings_manager import SettingsManager
 from ollama_service_manager import OllamaServiceManager, OllamaError
 from processing_history import ProcessingHistory
-from ui_components import create_model_indicators, create_scrolled_text, create_status_bar, create_toolbar, create_menu, update_output, handle_phase_error, reset_ui_state, clear_output, copy_to_clipboard, save_output, export_history, OutputHandler, sanitize_output
-from processing_functions import analyze_prompt, generate_solutions, vet_and_refine, finalize_prompt, enhance_prompt, comprehensive_review, validate_models, verify_model_availability, retry_with_fallback
+from ui_components import (
+    create_model_indicators, 
+    create_scrolled_text, 
+    create_status_bar, 
+    create_toolbar, 
+    create_menu,
+    LoadingIndicator,
+    update_output, 
+    handle_phase_error
+)
+from processing_functions import (
+    analyze_prompt,
+    generate_solutions, 
+    vet_and_refine,
+    finalize_prompt,
+    enhance_prompt,
+    comprehensive_review
+)
 
-# Initialize logging first
+# Initialize logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(message)s",
@@ -23,31 +41,15 @@ logger = logging.getLogger("prompt_enhancer")
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
-# Make sure customtkinter's images are in the correct path
-assets_dir = os.path.join(os.path.dirname(__file__), "assets")
-if not os.path.exists(assets_dir):
-    os.makedirs(assets_dir)
-os.environ["CUSTOMTKINTER_IMAGES_PATH"] = assets_dir
-
-# Create global application state (only one instance)
-app_state = ApplicationState()
-
+# Constants
 OLLAMA_MODELS = {
-    "analysis": "llama3.2:latest",      # Initial deep analysis
-    "generation": "olmo2:13b",           # Creative solution generation
-    "vetting": "deepseek-r1",            # Initial vetting
-    "finalization": "deepseek-r1:14b",     # First round improvement
-    "enhancement": "phi4:latest",         # Advanced enhancement
-    "comprehensive": "phi4:latest",       # Initial comprehensive review
-    "presenter": "deepseek-r1:14b",        # Final presentation cleanup
-}
-
-FALLBACK_ORDER = {
-    "llama3.2:latest": ["deepseek-r1", "phi4:latest"],
-    "olmo2:13b": ["deepseek-r1:14b", "phi4:latest"],
-    "deepseek-r1": ["phi4:latest", "llama3.2:latest"],
-    "deepseek-r1:14b": ["phi4:latest", "deepseek-r1"],
-    "phi4:latest": ["deepseek-r1:14b", "llama3.2:latest"],
+    "analysis": "llama2:latest",      # Initial deep analysis
+    "generation": "llama2:13b",       # Creative solution generation
+    "vetting": "codellama",           # Initial vetting
+    "finalization": "codellama:13b",  # First round improvement
+    "enhancement": "llama2:latest",    # Advanced enhancement
+    "comprehensive": "llama2:latest",  # Initial comprehensive review
+    "presenter": "codellama:13b",     # Final presentation cleanup
 }
 
 PROGRESS_MESSAGES = {
@@ -85,9 +87,10 @@ class ApplicationState:
     def initialize(self, root):
         """Initialize application state with root window"""
         self.root = root
-        self.processing_history = ProcessingHistory()
         self.settings_manager = SettingsManager()
+        self.processing_history = ProcessingHistory()
         self.ollama_manager = OllamaServiceManager(self)
+        self.loading = LoadingIndicator(root)
 
     def reset_indicators(self):
         """Reset all model indicators to inactive state"""
@@ -106,63 +109,157 @@ class ApplicationState:
         for key, value in kwargs.items():
             if hasattr(self, key):
                 setattr(self, key, value)
-        # Update toolbar references if available
-        if self.toolbar and ('input_text' in kwargs or 'output_text' in kwargs):
-            self.toolbar.update_references(self.input_text, self.output_text)
-        # Update menu references if available
-        if self.menu_manager and ('input_text' in kwargs or 'output_text' in kwargs):
-            self.menu_manager.update_references(self.input_text, self.output_text)
-
-# Create global application state (only one instance)
-app_state = ApplicationState()
 
 def process_prompt():
     """Process the input prompt through the enhancement pipeline."""
     if app_state.is_processing:
         return
+    
     app_state.is_processing = True
     def run_processing():
         try:
-            # dummy processing steps:
-            prompt = app_state.input_text.get("1.0", "end").strip() if app_state.input_text else ""
+            prompt = app_state.input_text.get("1.0", "end").strip()
+            if not prompt:
+                update_output("Error: No prompt entered.", is_error=True)
+                return
+
+            # Run the enhancement pipeline
+            app_state.loading.start(0)
             update_output(PROGRESS_MESSAGES["start"])
+
+            app_state.loading.update_label("Analyzing prompt...")
             analysis = analyze_prompt(prompt, OLLAMA_MODELS["analysis"])
-            update_output(PROGRESS_MESSAGES["analysis_done"])
+            app_state.loading.start(20)
+            update_output(PROGRESS_MESSAGES["analysis_done"] + analysis)
+
+            app_state.loading.update_label("Generating solutions...")
             solutions = generate_solutions(analysis, OLLAMA_MODELS["generation"])
-            update_output(PROGRESS_MESSAGES["generation_done"])
+            app_state.loading.start(40)
+            update_output(PROGRESS_MESSAGES["generation_done"] + solutions)
+
+            app_state.loading.update_label("Vetting improvements...")
             vetted = vet_and_refine(solutions, OLLAMA_MODELS["vetting"])
-            update_output(PROGRESS_MESSAGES["vetting_done"])
+            app_state.loading.start(60)
+            update_output(PROGRESS_MESSAGES["vetting_done"] + vetted)
+
+            app_state.loading.update_label("Finalizing prompt...")
             final = finalize_prompt(vetted, prompt, OLLAMA_MODELS["finalization"])
-            update_output(PROGRESS_MESSAGES["finalize_done"])
+            app_state.loading.start(80)
+            update_output(PROGRESS_MESSAGES["finalize_done"] + final)
+
+            app_state.loading.update_label("Enhancing result...")
             enhanced = enhance_prompt(final, OLLAMA_MODELS["enhancement"])
-            update_output(PROGRESS_MESSAGES["enhance_done"])
-            comprehensive = comprehensive_review(prompt, analysis, solutions, vetted, final, enhanced, OLLAMA_MODELS["comprehensive"])
+            app_state.loading.start(90)
+            update_output(PROGRESS_MESSAGES["enhance_done"] + enhanced)
+
+            app_state.loading.update_label("Final review...")
+            comprehensive = comprehensive_review(
+                prompt, analysis, solutions, vetted, 
+                final, enhanced, OLLAMA_MODELS["comprehensive"]
+            )
+            app_state.loading.start(100)
             update_output(comprehensive)
             update_output(PROGRESS_MESSAGES["complete"])
+
+            # Store in history
+            app_state.processing_history.add(prompt, comprehensive)
+
         except Exception as e:
-            handle_phase_error("Processing", e, None, app_state.loading, "")
+            error_msg = handle_phase_error("Processing", e, None, app_state.loading, "")
+            update_output(error_msg, is_error=True)
         finally:
             app_state.is_processing = False
+            app_state.loading.stop()
+            app_state.status_bar.set_status("Ready")
+
     processing_thread = threading.Thread(target=run_processing)
     processing_thread.daemon = True
     processing_thread.start()
 
-def main():
-    """Main function."""
-    root = tk.Tk()
+def setup_main_window(root):
+    """Set up the main application window"""
     root.title("Prompt Enhancer")
-    # Initialize global state UI elements
-    app_state.initialize(root)
-    app_state.status_bar = create_status_bar(root)
-    input_text = create_scrolled_text(root, height=10, width=50)
-    output_text = create_scrolled_text(root, height=10, width=50, readonly=True)
+    
+    # Create and configure the main container
+    main_container = ctk.CTkFrame(root)
+    main_container.pack(fill="both", expand=True, padx=10, pady=10)
+    
+    # Create model indicators
+    indicators_frame, indicators = create_model_indicators(main_container, OLLAMA_MODELS.keys())
+    indicators_frame.pack(fill="x", pady=(0, 10))
+    app_state.model_indicators = indicators
+    
+    # Create toolbar
+    toolbar = create_toolbar(main_container)
+    toolbar.pack(fill="x", pady=(0, 10))
+    app_state.toolbar = toolbar
+    
+    # Create text areas
+    input_frame = ctk.CTkFrame(main_container)
+    input_frame.pack(fill="both", expand=True)
+    
+    input_label = ctk.CTkLabel(input_frame, text="Input Prompt:")
+    input_label.pack(anchor="w")
+    
+    input_text = create_scrolled_text(input_frame, height=200)
+    input_text.pack(fill="both", expand=True, pady=(5, 10))
+    
+    output_frame = ctk.CTkFrame(main_container)
+    output_frame.pack(fill="both", expand=True)
+    
+    output_label = ctk.CTkLabel(output_frame, text="Enhanced Output:")
+    output_label.pack(anchor="w")
+    
+    output_text = create_scrolled_text(output_frame, height=200, readonly=True)
+    output_text.pack(fill="both", expand=True, pady=(5, 10))
+    
+    # Create process button
+    process_btn = ctk.CTkButton(
+        main_container,
+        text="Process Prompt",
+        command=process_prompt,
+        height=40
+    )
+    process_btn.pack(pady=10)
+    
+    # Create status bar
+    status_bar = create_status_bar(main_container)
+    status_bar.pack(fill="x", pady=(10, 0))
+    
+    # Update application state
     app_state.input_text = input_text
     app_state.output_text = output_text
-    toolbar = create_toolbar(root, input_text, output_text)
-    toolbar.pack(pady=5)
-    # Pack text widgets
-    input_text.pack(pady=5, fill="both", expand=True)
-    output_text.pack(pady=5, fill="both", expand=True)
+    app_state.status_bar = status_bar
+    
+    # Set up window state
+    root.update_idletasks()
+    width = 800
+    height = 900
+    x = (root.winfo_screenwidth() // 2) - (width // 2)
+    y = (root.winfo_screenheight() // 2) - (height // 2)
+    root.geometry(f"{width}x{height}+{x}+{y}")
+    
+    # Create menu
+    app_state.menu_manager = create_menu(root)
+
+# Create global application state
+app_state = ApplicationState()
+
+def main():
+    """Main entry point of the application."""
+    root = tk.Tk()
+    app_state.initialize(root)
+    
+    # Make sure customtkinter's images are in the correct path
+    assets_dir = os.path.join(os.path.dirname(__file__), "assets")
+    if not os.path.exists(assets_dir):
+        os.makedirs(assets_dir)
+    os.environ["CUSTOMTKINTER_IMAGES_PATH"] = assets_dir
+    
+    # Set up the main window
+    setup_main_window(root)
+    
+    # Start the main loop
     root.mainloop()
 
 if __name__ == "__main__":
