@@ -5,23 +5,24 @@ import threading
 from rich.logging import RichHandler
 import customtkinter as ctk
 from typing import Dict, List, Optional
-
+from flask import Flask
+from api import app as flask_app  # Import the Flask app instance
 from settings_manager import SettingsManager
 from ollama_service_manager import OllamaServiceManager, OllamaError
 from processing_history import ProcessingHistory
 from ui_components import (
-    create_model_indicators, 
-    create_scrolled_text, 
-    create_status_bar, 
-    create_toolbar, 
+    create_model_indicators,
+    create_scrolled_text,
+    create_status_bar,
+    create_toolbar,
     create_menu,
     LoadingIndicator,
-    update_output, 
+    update_output,
     handle_phase_error
 )
 from processing_functions import (
     analyze_prompt,
-    generate_solutions, 
+    generate_solutions,
     vet_and_refine,
     finalize_prompt,
     enhance_prompt,
@@ -114,7 +115,7 @@ def process_prompt():
     """Process the input prompt through the enhancement pipeline."""
     if app_state.is_processing:
         return
-    
+
     app_state.is_processing = True
     def run_processing():
         try:
@@ -127,34 +128,28 @@ def process_prompt():
             app_state.loading.start(0)
             update_output(PROGRESS_MESSAGES["start"])
 
-            app_state.loading.update_label("Analyzing prompt...")
             analysis = analyze_prompt(prompt, OLLAMA_MODELS["analysis"])
             app_state.loading.start(20)
             update_output(PROGRESS_MESSAGES["analysis_done"] + analysis)
 
-            app_state.loading.update_label("Generating solutions...")
             solutions = generate_solutions(analysis, OLLAMA_MODELS["generation"])
             app_state.loading.start(40)
             update_output(PROGRESS_MESSAGES["generation_done"] + solutions)
 
-            app_state.loading.update_label("Vetting improvements...")
             vetted = vet_and_refine(solutions, OLLAMA_MODELS["vetting"])
             app_state.loading.start(60)
             update_output(PROGRESS_MESSAGES["vetting_done"] + vetted)
 
-            app_state.loading.update_label("Finalizing prompt...")
             final = finalize_prompt(vetted, prompt, OLLAMA_MODELS["finalization"])
             app_state.loading.start(80)
             update_output(PROGRESS_MESSAGES["finalize_done"] + final)
 
-            app_state.loading.update_label("Enhancing result...")
             enhanced = enhance_prompt(final, OLLAMA_MODELS["enhancement"])
             app_state.loading.start(90)
             update_output(PROGRESS_MESSAGES["enhance_done"] + enhanced)
 
-            app_state.loading.update_label("Final review...")
             comprehensive = comprehensive_review(
-                prompt, analysis, solutions, vetted, 
+                prompt, analysis, solutions, vetted,
                 final, enhanced, OLLAMA_MODELS["comprehensive"]
             )
             app_state.loading.start(100)
@@ -179,40 +174,40 @@ def process_prompt():
 def setup_main_window(root):
     """Set up the main application window"""
     root.title("Prompt Enhancer")
-    
+
     # Create and configure the main container
     main_container = ctk.CTkFrame(root)
     main_container.pack(fill="both", expand=True, padx=10, pady=10)
-    
+
     # Create model indicators
     indicators_frame, indicators = create_model_indicators(main_container, OLLAMA_MODELS.keys())
     indicators_frame.pack(fill="x", pady=(0, 10))
     app_state.model_indicators = indicators
-    
+
     # Create toolbar
     toolbar = create_toolbar(main_container)
     toolbar.pack(fill="x", pady=(0, 10))
     app_state.toolbar = toolbar
-    
+
     # Create text areas
     input_frame = ctk.CTkFrame(main_container)
     input_frame.pack(fill="both", expand=True)
-    
+
     input_label = ctk.CTkLabel(input_frame, text="Input Prompt:")
     input_label.pack(anchor="w")
-    
+
     input_text = create_scrolled_text(input_frame, height=200)
     input_text.pack(fill="both", expand=True, pady=(5, 10))
-    
+
     output_frame = ctk.CTkFrame(main_container)
     output_frame.pack(fill="both", expand=True)
-    
+
     output_label = ctk.CTkLabel(output_frame, text="Enhanced Output:")
     output_label.pack(anchor="w")
-    
+
     output_text = create_scrolled_text(output_frame, height=200, readonly=True)
     output_text.pack(fill="both", expand=True, pady=(5, 10))
-    
+
     # Create process button
     process_btn = ctk.CTkButton(
         main_container,
@@ -221,16 +216,16 @@ def setup_main_window(root):
         height=40
     )
     process_btn.pack(pady=10)
-    
+
     # Create status bar
     status_bar = create_status_bar(main_container)
     status_bar.pack(fill="x", pady=(10, 0))
-    
+
     # Update application state
     app_state.input_text = input_text
     app_state.output_text = output_text
     app_state.status_bar = status_bar
-    
+
     # Set up window state
     root.update_idletasks()
     width = 800
@@ -238,27 +233,36 @@ def setup_main_window(root):
     x = (root.winfo_screenwidth() // 2) - (width // 2)
     y = (root.winfo_screenheight() // 2) - (height // 2)
     root.geometry(f"{width}x{height}+{x}+{y}")
-    
+
     # Create menu
     app_state.menu_manager = create_menu(root)
 
 # Create global application state
 app_state = ApplicationState()
 
+def start_flask_app():
+    """Start the Flask app in a separate thread."""
+    flask_app.run(debug=True, use_reloader=False)
+
 def main():
     """Main entry point of the application."""
     root = tk.Tk()
     app_state.initialize(root)
-    
+
     # Make sure customtkinter's images are in the correct path
     assets_dir = os.path.join(os.path.dirname(__file__), "assets")
     if not os.path.exists(assets_dir):
         os.makedirs(assets_dir)
     os.environ["CUSTOMTKINTER_IMAGES_PATH"] = assets_dir
-    
+
     # Set up the main window
     setup_main_window(root)
-    
+
+    # Start the Flask app in a separate thread
+    flask_thread = threading.Thread(target=start_flask_app)
+    flask_thread.daemon = True
+    flask_thread.start()
+
     # Start the main loop
     root.mainloop()
 
