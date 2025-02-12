@@ -34,27 +34,25 @@
 
         <!-- Status Bar -->
         <div class="flex items-center justify-between bg-gray-200 p-4 rounded mb-4">
-            <div id="model-status" class="text-gray-700">
-                Models: Connected
-            </div>
-            <div id="memory-usage" class="text-gray-700">
-                Memory: --
-            </div>
-            <div id="processing-status" class="text-gray-700">
-                Ready
-            </div>
+            <div id="model-status" class="text-gray-700">Models: Connected</div>
+            <div id="memory-usage" class="text-gray-700">Memory: --</div>
+            <div id="processing-status" class="text-gray-700">Ready</div>
         </div>
 
         <!-- Input Area -->
         <div class="mb-6">
-            <label class="block text-gray-700 text-sm font-bold mb-2" for="input-prompt">Input Prompt:</label>
-            <textarea id="input-prompt" class="shadow appearance-none border rounded w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none" rows="6"></textarea>
+            <label for="input-prompt" class="block text-gray-700 text-sm font-bold mb-2">
+                Input Prompt:
+            </label>
+            <textarea id="input-prompt" class="shadow appearance-none border rounded w-full py-3 px-4 text-gray-700 focus:outline-none" rows="6"></textarea>
         </div>
 
         <!-- Output Area -->
         <div class="mb-6">
-            <label class="block text-gray-700 text-sm font-bold mb-2" for="output-text">Enhanced Output:</label>
-            <textarea id="output-text" class="shadow appearance-none border rounded w-full py-3 px-4 text-gray-700 leading-tight focus:outline-none" rows="6" readonly></textarea>
+            <label for="output-text" class="block text-gray-700 text-sm font-bold mb-2">
+                Enhanced Output:
+            </label>
+            <textarea id="output-text" class="shadow appearance-none border rounded w-full py-3 px-4 text-gray-700 focus:outline-none" rows="6" readonly></textarea>
         </div>
 
         <!-- Process Button & Loading Indicator -->
@@ -64,16 +62,18 @@
             </button>
         </div>
         <div id="loading-indicator" class="flex items-center justify-center p-4 hidden">
-            <progress class="w-64 h-2 bg-gray-300 rounded" value="0" max="100"></progress>
+            <progress id="progress-bar" class="w-64 h-2 bg-gray-300 rounded" value="0" max="100"></progress>
             <div id="loading-label" class="text-gray-600 ml-4">Processing...</div>
         </div>
     </div>
 
     <script>
+        // Get DOM elements
         const themeToggle = document.getElementById('theme-toggle');
         const body = document.querySelector('body');
         const processButton = document.getElementById('process-button');
         const loadingIndicator = document.getElementById('loading-indicator');
+        const progressBar = document.getElementById('progress-bar');
         const loadingLabel = document.getElementById('loading-label');
         const inputPrompt = document.getElementById('input-prompt');
         const outputText = document.getElementById('output-text');
@@ -97,12 +97,10 @@
         // Toggle Theme
         themeToggle.addEventListener('click', () => {
             if (body.classList.contains('bg-gray-100')) {
-                body.classList.remove('bg-gray-100');
-                body.classList.add('bg-gray-800');
+                body.classList.replace('bg-gray-100', 'bg-gray-800');
                 themeToggle.textContent = 'Theme: Dark';
             } else {
-                body.classList.remove('bg-gray-800');
-                body.classList.add('bg-gray-100');
+                body.classList.replace('bg-gray-800', 'bg-gray-100');
                 themeToggle.textContent = 'Theme: Light';
             }
         });
@@ -118,92 +116,96 @@
         // Set active model indicator
         function setActiveModelIndicator(indicator) {
             resetModelIndicators();
-            indicator.classList.remove('text-gray-700');
-            indicator.classList.add('text-blue-500');
+            indicator.classList.replace('text-gray-700', 'text-blue-500');
         }
 
-        // Set processing status
+        // Set processing status and update UI elements
         function setProcessingStatus(status, isError = false) {
             processingStatus.textContent = status;
-            processingStatus.classList.remove('text-gray-700', 'text-red-500');
-            processingStatus.classList.add(isError ? 'text-red-500' : 'text-gray-700');
+            processingStatus.classList.toggle('text-red-500', isError);
+            processingStatus.classList.toggle('text-gray-700', !isError);
         }
 
-        // Simulation functions for processing phases (replace with real logic if needed)
-        function simulatePhase(phaseName, delay = 1000, resultText = "") {
+        // Simulation function for processing phases
+        function simulatePhase(phaseName, delay, simulatedOutput, progress) {
             return new Promise(resolve => {
-                setProcessingStatus(phaseName + "...");
-                loadingLabel.textContent = phaseName + " in progress...";
+                setProcessingStatus(`${phaseName}...`);
+                loadingLabel.textContent = `${phaseName} in progress...`;
+                progressBar.value = progress;
                 setTimeout(() => {
-                    resolve(resultText);
+                    resolve(simulatedOutput);
                 }, delay);
             });
         }
 
+        // Process the prompt using simulated phases
         async function processPrompt() {
             const prompt = inputPrompt.value.trim();
-            if (!prompt) return;
-
-            // Make UI changes for processing start
-            loadingIndicator.classList.remove('hidden');
+            if (!prompt) {
+                setProcessingStatus("Error: No prompt entered!", true);
+                return;
+            }
+            
+            // Clear previous output and show loading indicator
             outputText.value = "";
-            resetModelIndicators();
-            setProcessingStatus('Processing prompt...');
-            let finalResult = "";
+            loadingIndicator.classList.remove('hidden');
+            setProcessingStatus("Processing prompt...");
 
             try {
                 // Analysis Phase
                 setActiveModelIndicator(analysisIndicator);
-                let analysis = await simulatePhase("Analysis", 1500, "Analysis: Identified core objectives and constraints.\n");
+                const analysis = await simulatePhase("Analysis", 1500, "Analysis: Core objectives and constraints identified.\n", 20);
                 outputText.value += analysis + "\n";
-                
+
                 // Generation Phase
                 setActiveModelIndicator(generationIndicator);
-                let generation = await simulatePhase("Generation", 1500, "Generation: Produced creative alternatives.\n");
+                const generation = await simulatePhase("Generation", 1500, "Generation: Creative alternatives produced.\n", 40);
                 outputText.value += generation + "\n";
-                
+
                 // Vetting Phase
                 setActiveModelIndicator(vettingIndicator);
-                let vetting = await simulatePhase("Vetting", 1500, "Vetting: Screened and refined alternatives.\n");
+                const vetting = await simulatePhase("Vetting", 1500, "Vetting: Alternatives screened and refined.\n", 60);
                 outputText.value += vetting + "\n";
-                
+
                 // Finalization Phase
                 setActiveModelIndicator(finalizationIndicator);
-                let finalization = await simulatePhase("Finalization", 1500, "Finalization: Merged feedback into a draft prompt.\n");
+                const finalization = await simulatePhase("Finalization", 1500, "Finalization: Feedback merged into draft prompt.\n", 80);
                 outputText.value += finalization + "\n";
-                
+
                 // Enhancement Phase
                 setActiveModelIndicator(enhancementIndicator);
-                let enhancement = await simulatePhase("Enhancement", 1500, "Enhancement: Polished language and added clarity.\n");
+                const enhancement = await simulatePhase("Enhancement", 1500, "Enhancement: Language polished and clarity improved.\n", 90);
                 outputText.value += enhancement + "\n";
-                
+
                 // Comprehensive Review Phase
                 setActiveModelIndicator(comprehensiveIndicator);
-                let comprehensive = await simulatePhase("Comprehensive Review", 1500, "Comprehensive Review: Final super prompt assembled.\n");
-                outputText.value += comprehensive;
-                
-                finalResult = "Enhanced Prompt:\n" + prompt + "\n\n" + "Final Result:\n" + analysis + generation + vetting + finalization + enhancement + comprehensive;
-                setProcessingStatus('Process complete.');
+                const comprehensive = await simulatePhase("Comprehensive Review", 1500, "Comprehensive Review: Final prompt finalized.\n", 100);
+                outputText.value += comprehensive + "\n";
+
+                setProcessingStatus("Process complete.");
             } catch (error) {
-                setProcessingStatus('Error: ' + error, true);
-                outputText.value += "\nError encountered.";
+                setProcessingStatus("Error: " + error, true);
+                outputText.value += "\nError encountered during processing.";
             } finally {
                 loadingIndicator.classList.add('hidden');
             }
         }
         
-        // Button actions
+        // Button Event Listeners
         processButton.addEventListener('click', processPrompt);
-        
+
         newButton.addEventListener('click', () => {
             inputPrompt.value = '';
             outputText.value = '';
+            setProcessingStatus("Ready");
+            resetModelIndicators();
+            progressBar.value = 0;
         });
-        
+
         copyButton.addEventListener('click', () => {
             navigator.clipboard.writeText(outputText.value);
         });
-        
+
         saveButton.addEventListener('click', () => {
             const text = outputText.value;
             const filename = 'output.txt';
@@ -216,9 +218,9 @@
             a.click();
             a.remove();
         });
-        
+
         exportHistoryButton.addEventListener('click', () => {
-            // For demonstration, we simply export a dummy history
+            // For demonstration, export the current output as history
             const history = { history: [outputText.value] };
             const blob = new Blob([JSON.stringify(history, null, 2)], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
