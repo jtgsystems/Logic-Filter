@@ -1,3 +1,5 @@
+![Banner](banner.png)
+
 # Logic Filter
 
 A GUI application that analyzes, improves, and refines prompts using a
