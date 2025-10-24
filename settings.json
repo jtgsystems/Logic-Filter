@@ -5,6 +5,10 @@
   "autosave": true,
   "show_model_indicators": true,
   "save_window_state": true,
+  "window": {
+    "geometry": "800x600+100+100",
+    "zoomed": true
+  },
   "default_models": {
     "analysis": "llama3.2:latest",
     "generation": "olmo2:13b",
@@ -13,9 +17,5 @@
     "enhancement": "phi4:latest",
     "comprehensive": "phi4:latest",
     "presenter": "deepseek-r1:14b"
-  },
-  "window": {
-    "geometry": "1024x768+714+78",
-    "zoomed": false
   }
 }

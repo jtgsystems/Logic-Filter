@@ -1,32 +1,32 @@
-import tkinter as tk
 import logging
 import os
 import threading
-from rich.logging import RichHandler
+import tkinter as tk
+
 import customtkinter as ctk
-from typing import Dict, List, Optional
-from flask import Flask
+from rich.logging import RichHandler
+
 from api import app as flask_app  # Import the Flask app instance
-from settings_manager import SettingsManager
-from ollama_service_manager import OllamaServiceManager, OllamaError
+from ollama_service_manager import OllamaServiceManager
+from processing_functions import (
+    analyze_prompt,
+    comprehensive_review,
+    enhance_prompt,
+    finalize_prompt,
+    generate_solutions,
+    vet_and_refine,
+)
 from processing_history import ProcessingHistory
+from settings_manager import SettingsManager
 from ui_components import (
+    LoadingIndicator,
+    create_menu,
     create_model_indicators,
     create_scrolled_text,
     create_status_bar,
     create_toolbar,
-    create_menu,
-    LoadingIndicator,
+    handle_phase_error,
     update_output,
-    handle_phase_error
-)
-from processing_functions import (
-    analyze_prompt,
-    generate_solutions,
-    vet_and_refine,
-    finalize_prompt,
-    enhance_prompt,
-    comprehensive_review
 )
 
 # Initialize logging
@@ -44,13 +44,21 @@ ctk.set_default_color_theme("blue")
 
 # Constants
 OLLAMA_MODELS = {
-    "analysis": "llama2:latest",      # Initial deep analysis
-    "generation": "llama2:13b",       # Creative solution generation
-    "vetting": "codellama",           # Initial vetting
-    "finalization": "codellama:13b",  # First round improvement
-    "enhancement": "llama2:latest",    # Advanced enhancement
-    "comprehensive": "llama2:latest",  # Initial comprehensive review
-    "presenter": "codellama:13b",     # Final presentation cleanup
+    "analysis": "llama3.2:latest",      # Initial deep analysis
+    "generation": "olmo2:13b",           # Creative solution generation
+    "vetting": "deepseek-r1",            # Initial vetting
+    "finalization": "deepseek-r1:14b",   # First round improvement
+    "enhancement": "phi4:latest",        # Advanced enhancement
+    "comprehensive": "phi4:latest",      # Initial comprehensive review
+    "presenter": "deepseek-r1:14b",      # Final presentation cleanup
+}
+
+FALLBACK_ORDER = {
+    "llama3.2:latest": ["deepseek-r1", "phi4:latest"],
+    "olmo2:13b": ["deepseek-r1:14b", "phi4:latest"],
+    "deepseek-r1": ["phi4:latest", "llama3.2:latest"],
+    "deepseek-r1:14b": ["phi4:latest", "deepseek-r1"],
+    "phi4:latest": ["deepseek-r1:14b", "llama3.2:latest"],
 }
 
 PROGRESS_MESSAGES = {
@@ -242,7 +250,8 @@ app_state = ApplicationState()
 
 def start_flask_app():
     """Start the Flask app in a separate thread."""
-    flask_app.run(debug=True, use_reloader=False)
+    debug_mode = os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
+    flask_app.run(debug=debug_mode, use_reloader=False, host='127.0.0.1', port=5000)
 
 def main():
     """Main entry point of the application."""

@@ -1,26 +1,29 @@
 import logging
-from typing import Optional, Dict, List
+from typing import List
+
 from ollama_service_manager import OllamaError
 
 logger = logging.getLogger("prompt_enhancer")
 
 def retry_with_fallback(func, *args, max_retries=3, **kwargs):
     """Retry a function with fallback models if the primary model fails"""
+    from main import FALLBACK_ORDER, OLLAMA_MODELS
+
     last_error = None
     model_arg_index = -1  # Find the model argument
-    
+
     # Find which argument is the model name
     for i, arg in enumerate(args):
         if isinstance(arg, str) and arg in OLLAMA_MODELS.values():
             model_arg_index = i
             break
-    
+
     if model_arg_index == -1:
         raise ValueError("No model argument found")
-        
+
     current_model = args[model_arg_index]
     args = list(args)  # Convert to list for modification
-    
+
     # Try primary model first
     for _ in range(max_retries):
         try:
@@ -28,7 +31,7 @@ def retry_with_fallback(func, *args, max_retries=3, **kwargs):
         except Exception as e:
             last_error = e
             logger.warning(f"Error with model {current_model}: {e}")
-    
+
     # Try fallback models
     if current_model in FALLBACK_ORDER:
         for fallback_model in FALLBACK_ORDER[current_model]:
@@ -39,14 +42,14 @@ def retry_with_fallback(func, *args, max_retries=3, **kwargs):
             except Exception as e:
                 last_error = e
                 logger.warning(f"Error with fallback model {fallback_model}: {e}")
-    
+
     raise last_error or Exception("All models failed")
 
 def analyze_prompt(prompt: str, model_name: str) -> str:
     """Analyze the initial prompt."""
     messages = [
         {
-            "role": "user", 
+            "role": "user",
             "content": (
                 f"Analyze this prompt: '{prompt}'\n\n"
                 "Focus on:\n"
@@ -198,7 +201,7 @@ def comprehensive_review(
     """Create final version and ensure clean presentation."""
     try:
         from main import app_state
-        
+
         # First, use model for comprehensive review
         messages = [
             {
@@ -241,9 +244,10 @@ def comprehensive_review(
                 )
             }
         ]
-        
+
+        from main import OLLAMA_MODELS
         response = app_state.ollama_manager.chat(
-            model=app_state.OLLAMA_MODELS["presenter"],
+            model=OLLAMA_MODELS["presenter"],
             messages=messages
         )
         return response["message"]["content"]
@@ -257,7 +261,7 @@ def verify_model_availability(model_name: str) -> bool:
         from main import app_state
         if not app_state.ollama_manager.ollama_ready:
             return False
-        
+
         # Try to ping the model with a timeout
         app_state.ollama_manager.chat(
             model=model_name,
@@ -277,14 +281,14 @@ def verify_model_availability(model_name: str) -> bool:
 
 def validate_models() -> List[tuple]:
     """Validate all required models are available."""
-    from main import app_state, OLLAMA_MODELS
-    
+    from main import OLLAMA_MODELS, app_state
+
     if not app_state.ollama_manager.ollama_ready:
         return []
-        
+
     unavailable_models = []
     connection_error = None
-    
+
     for purpose, model in OLLAMA_MODELS.items():
         try:
             if not verify_model_availability(model):
@@ -294,8 +298,8 @@ def validate_models() -> List[tuple]:
                 connection_error = str(e)
                 break
             unavailable_models.append((purpose, model))
-    
+
     if connection_error:
         raise OllamaError(connection_error)
-        
+
     return unavailable_models

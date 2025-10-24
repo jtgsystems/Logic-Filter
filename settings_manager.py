@@ -1,6 +1,6 @@
 import json
-import os
 import logging
+import os
 from typing import Any, Dict
 
 logger = logging.getLogger("prompt_enhancer")
@@ -22,12 +22,12 @@ class SettingsManager:
             }
         }
         self.settings = self.load_settings()
-        
+
     def load_settings(self) -> Dict[str, Any]:
         """Load settings from file."""
         try:
             if os.path.exists(self.settings_file):
-                with open(self.settings_file, 'r') as f:
+                with open(self.settings_file) as f:
                     loaded = json.load(f)
                     # Merge with defaults to ensure all settings exist
                     return {**self.default_settings, **loaded}
@@ -35,7 +35,7 @@ class SettingsManager:
         except Exception as e:
             logger.error(f"Failed to load settings: {e}")
             return self.default_settings.copy()
-            
+
     def save_settings(self) -> None:
         """Save current settings to file."""
         try:
@@ -43,11 +43,11 @@ class SettingsManager:
                 json.dump(self.settings, f, indent=2)
         except Exception as e:
             logger.error(f"Failed to save settings: {e}")
-            
+
     def get(self, key: str, default: Any = None) -> Any:
         """Get a setting value."""
         return self.settings.get(key, default)
-        
+
     def set(self, key: str, value: Any) -> None:
         """Set a setting value."""
         try:
