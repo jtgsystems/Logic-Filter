@@ -695,3 +695,8 @@ See `Meta-Prompt Template.md` for comprehensive prompt engineering guidelines in
 
 **Last Updated**: 2025-10-26
 **Claude Code Documentation Generated**: Automated analysis and documentation
+
+## Framework Versions
+
+- **Flask**: Flask
+
