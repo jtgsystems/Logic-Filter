@@ -1,15 +1,15 @@
 import logging
 from typing import Optional, Dict, List
-from ollama_service_manager import OllamaError
+from ollama_service_manager import OllamaError, get_ollama_manager
+from config import OLLAMA_MODELS, FALLBACK_ORDER
 
 logger = logging.getLogger("prompt_enhancer")
 
 def retry_with_fallback(func, *args, max_retries=3, **kwargs):
     """Retry a function with fallback models if the primary model fails"""
     last_error = None
-    model_arg_index = -1  # Find the model argument
+    model_arg_index = -1
     
-    # Find which argument is the model name
     for i, arg in enumerate(args):
         if isinstance(arg, str) and arg in OLLAMA_MODELS.values():
             model_arg_index = i
@@ -19,9 +19,8 @@ def retry_with_fallback(func, *args, max_retries=3, **kwargs):
         raise ValueError("No model argument found")
         
     current_model = args[model_arg_index]
-    args = list(args)  # Convert to list for modification
+    args = list(args)
     
-    # Try primary model first
     for _ in range(max_retries):
         try:
             return func(*args, **kwargs)
@@ -29,7 +28,6 @@ def retry_with_fallback(func, *args, max_retries=3, **kwargs):
             last_error = e
             logger.warning(f"Error with model {current_model}: {e}")
     
-    # Try fallback models
     if current_model in FALLBACK_ORDER:
         for fallback_model in FALLBACK_ORDER[current_model]:
             args[model_arg_index] = fallback_model
@@ -61,8 +59,8 @@ def analyze_prompt(prompt: str, model_name: str) -> str:
         }
     ]
     try:
-        from main import app_state
-        response = app_state.ollama_manager.chat(
+        ollama_manager = get_ollama_manager()
+        response = ollama_manager.chat(
             model=model_name,
             messages=messages
         )
@@ -90,8 +88,8 @@ def generate_solutions(analysis: str, model_name: str) -> str:
         }
     ]
     try:
-        from main import app_state
-        response = app_state.ollama_manager.chat(
+        ollama_manager = get_ollama_manager()
+        response = ollama_manager.chat(
             model=model_name,
             messages=messages
         )
@@ -118,8 +116,8 @@ def vet_and_refine(improvements: str, model_name: str) -> str:
         }
     ]
     try:
-        from main import app_state
-        response = app_state.ollama_manager.chat(
+        ollama_manager = get_ollama_manager()
+        response = ollama_manager.chat(
             model=model_name,
             messages=messages
         )
@@ -147,8 +145,8 @@ def finalize_prompt(vetting_report: str, original_prompt: str, model_name: str) 
         }
     ]
     try:
-        from main import app_state
-        response = app_state.ollama_manager.chat(
+        ollama_manager = get_ollama_manager()
+        response = ollama_manager.chat(
             model=model_name,
             messages=messages
         )
@@ -176,8 +174,8 @@ def enhance_prompt(final_prompt: str, model_name: str) -> str:
         }
     ]
     try:
-        from main import app_state
-        response = app_state.ollama_manager.chat(
+        ollama_manager = get_ollama_manager()
+        response = ollama_manager.chat(
             model=model_name,
             messages=messages
         )
@@ -196,10 +194,8 @@ def comprehensive_review(
     model_name: str
 ) -> str:
     """Create final version and ensure clean presentation."""
+    ollama_manager = get_ollama_manager()
     try:
-        from main import app_state
-        
-        # First, use model for comprehensive review
         messages = [
             {
                 "role": "user",
@@ -217,13 +213,12 @@ def comprehensive_review(
                 )
             }
         ]
-        response = app_state.ollama_manager.chat(
+        response = ollama_manager.chat(
             model=model_name,
             messages=messages
         )
         improved = response["message"]["content"]
 
-        # Then use presenter model for final cleanup
         messages = [
             {
                 "role": "user",
@@ -242,8 +237,8 @@ def comprehensive_review(
             }
         ]
         
-        response = app_state.ollama_manager.chat(
-            model=app_state.OLLAMA_MODELS["presenter"],
+        response = ollama_manager.chat(
+            model=OLLAMA_MODELS["presenter"],
             messages=messages
         )
         return response["message"]["content"]
@@ -253,13 +248,12 @@ def comprehensive_review(
 
 def verify_model_availability(model_name: str) -> bool:
     """Verify if an Ollama model is available."""
+    ollama_manager = get_ollama_manager()
     try:
-        from main import app_state
-        if not app_state.ollama_manager.ollama_ready:
+        if not ollama_manager.ollama_ready:
             return False
         
-        # Try to ping the model with a timeout
-        app_state.ollama_manager.chat(
+        ollama_manager.chat(
             model=model_name,
             messages=[{"role": "user", "content": "test"}],
             options={"timeout": 5000}
@@ -277,9 +271,9 @@ def verify_model_availability(model_name: str) -> bool:
 
 def validate_models() -> List[tuple]:
     """Validate all required models are available."""
-    from main import app_state, OLLAMA_MODELS
+    ollama_manager = get_ollama_manager()
     
-    if not app_state.ollama_manager.ollama_ready:
+    if not ollama_manager.ollama_ready:
         return []
         
     unavailable_models = []

@@ -7,7 +7,7 @@ from processing_functions import (
     enhance_prompt,
     comprehensive_review
 )
-from main import OLLAMA_MODELS
+from config import OLLAMA_MODELS
 import logging
 
 app = Flask(__name__)
