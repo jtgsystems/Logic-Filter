@@ -42,15 +42,16 @@ logger = logging.getLogger("prompt_enhancer")
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
-# Constants
+# Constants - Ollama model configuration
+# These should match settings.json default_models
 OLLAMA_MODELS = {
-    "analysis": "llama2:latest",      # Initial deep analysis
-    "generation": "llama2:13b",       # Creative solution generation
-    "vetting": "codellama",           # Initial vetting
-    "finalization": "codellama:13b",  # First round improvement
-    "enhancement": "llama2:latest",    # Advanced enhancement
-    "comprehensive": "llama2:latest",  # Initial comprehensive review
-    "presenter": "codellama:13b",     # Final presentation cleanup
+    "analysis": "llama3.2:latest",      # Initial deep analysis
+    "generation": "olmo2:13b",          # Creative solution generation
+    "vetting": "deepseek-r1",           # Initial vetting
+    "finalization": "deepseek-r1:14b",  # First round improvement
+    "enhancement": "phi4:latest",       # Advanced enhancement
+    "comprehensive": "phi4:latest",     # Initial comprehensive review
+    "presenter": "deepseek-r1:14b",     # Final presentation cleanup
 }
 
 PROGRESS_MESSAGES = {
@@ -150,7 +151,8 @@ def process_prompt():
 
             comprehensive = comprehensive_review(
                 prompt, analysis, solutions, vetted,
-                final, enhanced, OLLAMA_MODELS["comprehensive"]
+                final, enhanced, OLLAMA_MODELS["comprehensive"],
+                OLLAMA_MODELS["presenter"]
             )
             app_state.loading.start(100)
             update_output(comprehensive)

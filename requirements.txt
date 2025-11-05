@@ -1,5 +1,26 @@
-Flask
-customtkinter
-rich
-psutil
-pytest
+# Web Framework
+Flask==3.1.2
+Flask-CORS==5.0.0
+
+# AI Integration
+ollama==0.4.4
+
+# GUI Framework
+customtkinter==5.2.2
+
+# Logging & Monitoring
+rich==13.9.4
+psutil==6.1.1
+
+# Testing
+pytest==8.3.4
+pytest-cov==6.0.0
+pytest-mock==3.14.0
+
+# HTTP Requests
+requests==2.32.3
+
+# Code Quality
+black==24.10.0
+flake8==7.1.1
+mypy==1.13.0

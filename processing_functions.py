@@ -1,34 +1,64 @@
+"""
+Processing functions for the Logic Filter AI pipeline.
+Handles the six-phase prompt enhancement process.
+"""
+
 import logging
 from typing import Optional, Dict, List
 from ollama_service_manager import OllamaError
 
 logger = logging.getLogger("prompt_enhancer")
 
+# Fallback model configuration for retry logic
+FALLBACK_ORDER = {
+    "llama3.2:latest": ["deepseek-r1", "phi4:latest"],
+    "olmo2:13b": ["deepseek-r1:14b", "phi4:latest"],
+    "deepseek-r1": ["phi4:latest", "llama3.2:latest"],
+    "deepseek-r1:14b": ["phi4:latest", "deepseek-r1"],
+    "phi4:latest": ["deepseek-r1:14b", "llama3.2:latest"]
+}
+
 def retry_with_fallback(func, *args, max_retries=3, **kwargs):
-    """Retry a function with fallback models if the primary model fails"""
+    """
+    Retry a function with fallback models if the primary model fails.
+
+    Args:
+        func: Function to retry
+        *args: Positional arguments to pass to func
+        max_retries: Maximum number of retries per model
+        **kwargs: Keyword arguments to pass to func
+
+    Returns:
+        Result from successful function call
+
+    Raises:
+        Exception: If all models and fallbacks fail
+    """
     last_error = None
-    model_arg_index = -1  # Find the model argument
-    
+    model_arg_index = -1
+
     # Find which argument is the model name
     for i, arg in enumerate(args):
-        if isinstance(arg, str) and arg in OLLAMA_MODELS.values():
-            model_arg_index = i
-            break
-    
+        if isinstance(arg, str):
+            # Check if it matches any known model pattern
+            if any(model_type in arg for model_type in ['llama', 'deepseek', 'phi', 'olmo', 'codellama']):
+                model_arg_index = i
+                break
+
     if model_arg_index == -1:
         raise ValueError("No model argument found")
-        
+
     current_model = args[model_arg_index]
     args = list(args)  # Convert to list for modification
-    
+
     # Try primary model first
-    for _ in range(max_retries):
+    for attempt in range(max_retries):
         try:
             return func(*args, **kwargs)
         except Exception as e:
             last_error = e
-            logger.warning(f"Error with model {current_model}: {e}")
-    
+            logger.warning(f"Error with model {current_model} (attempt {attempt + 1}/{max_retries}): {e}")
+
     # Try fallback models
     if current_model in FALLBACK_ORDER:
         for fallback_model in FALLBACK_ORDER[current_model]:
@@ -39,7 +69,7 @@ def retry_with_fallback(func, *args, max_retries=3, **kwargs):
             except Exception as e:
                 last_error = e
                 logger.warning(f"Error with fallback model {fallback_model}: {e}")
-    
+
     raise last_error or Exception("All models failed")
 
 def analyze_prompt(prompt: str, model_name: str) -> str:
@@ -193,12 +223,31 @@ def comprehensive_review(
     vetting_report: str,
     final_prompt: str,
     enhanced_prompt: str,
-    model_name: str
+    model_name: str,
+    presenter_model: str = None
 ) -> str:
-    """Create final version and ensure clean presentation."""
+    """
+    Create final version and ensure clean presentation.
+
+    Args:
+        original_prompt: The original user prompt
+        analysis_report: Analysis phase output
+        solutions: Generation phase output
+        vetting_report: Vetting phase output
+        final_prompt: Finalization phase output
+        enhanced_prompt: Enhancement phase output
+        model_name: Model for comprehensive review
+        presenter_model: Model for final presentation (optional)
+
+    Returns:
+        Final cleaned and presented prompt
+
+    Raises:
+        OllamaError: If processing fails
+    """
     try:
         from main import app_state
-        
+
         # First, use model for comprehensive review
         messages = [
             {
@@ -224,6 +273,10 @@ def comprehensive_review(
         improved = response["message"]["content"]
 
         # Then use presenter model for final cleanup
+        if presenter_model is None:
+            # Fallback to comprehensive model if no presenter specified
+            presenter_model = model_name
+
         messages = [
             {
                 "role": "user",
@@ -241,9 +294,9 @@ def comprehensive_review(
                 )
             }
         ]
-        
+
         response = app_state.ollama_manager.chat(
-            model=app_state.OLLAMA_MODELS["presenter"],
+            model=presenter_model,
             messages=messages
         )
         return response["message"]["content"]
@@ -275,17 +328,28 @@ def verify_model_availability(model_name: str) -> bool:
             logger.error(f"Model {model_name} is not available: {str(e)}")
             return False
 
-def validate_models() -> List[tuple]:
-    """Validate all required models are available."""
-    from main import app_state, OLLAMA_MODELS
-    
+def validate_models(ollama_models: Dict[str, str]) -> List[tuple]:
+    """
+    Validate all required models are available.
+
+    Args:
+        ollama_models: Dictionary mapping model purposes to model names
+
+    Returns:
+        List of tuples (purpose, model_name) for unavailable models
+
+    Raises:
+        OllamaError: If cannot connect to Ollama service
+    """
+    from main import app_state
+
     if not app_state.ollama_manager.ollama_ready:
         return []
-        
+
     unavailable_models = []
     connection_error = None
-    
-    for purpose, model in OLLAMA_MODELS.items():
+
+    for purpose, model in ollama_models.items():
         try:
             if not verify_model_availability(model):
                 unavailable_models.append((purpose, model))
@@ -294,8 +358,8 @@ def validate_models() -> List[tuple]:
                 connection_error = str(e)
                 break
             unavailable_models.append((purpose, model))
-    
+
     if connection_error:
         raise OllamaError(connection_error)
-        
+
     return unavailable_models
