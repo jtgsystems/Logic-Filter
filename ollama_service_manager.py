@@ -27,7 +27,7 @@ class OllamaServiceManager:
         """Check if Ollama service is running and accessible."""
         try:
             response = requests.get(
-                "http://localhost:11434/api/health",
+                "http://localhost:11434/api/version",
                 timeout=self.app_state.settings_manager.get('request_timeout', REQUEST_TIMEOUT_SEC)
             )
             if response.status_code == 200:
