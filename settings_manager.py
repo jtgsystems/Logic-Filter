@@ -14,6 +14,7 @@ class SettingsManager:
             'font_size': 12,
             'max_history': 50,
             'autosave': True,
+            'mode': 'auto',
             'request_timeout': 2,
             'model_timeout_ms': 120000,
             'show_model_indicators': True,

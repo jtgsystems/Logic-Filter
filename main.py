@@ -145,7 +145,8 @@ def process_prompt():
                 if app_state.root:
                     app_state.root.after(0, _ui_update)
 
-            results = run_full_pipeline(prompt, progress_cb=progress_cb)
+            mode = app_state.settings_manager.get("mode", None) if app_state.settings_manager else None
+            results = run_full_pipeline(prompt, progress_cb=progress_cb, mode=mode)
 
             # Store in history
             app_state.processing_history.add(prompt, results.get("comprehensive", ""))

@@ -13,13 +13,14 @@ logger = logging.getLogger(__name__)
 def process_prompt():
     data = request.get_json(silent=True) or {}
     prompt = (data.get('prompt') or "").strip()
+    mode = (data.get('mode') or "").strip() or None
     if not prompt:
         return jsonify({'error': 'prompt is required'}), 400
 
     logger.info(f"Received prompt: {prompt}")
 
     try:
-        results = run_full_pipeline(prompt)
+        results = run_full_pipeline(prompt, mode=mode)
         comprehensive = results.get("comprehensive", "")
 
         logger.info("Prompt processed successfully")

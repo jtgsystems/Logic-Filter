@@ -1,7 +1,7 @@
 import logging
 from typing import Callable, Dict, List, Optional
 
-from config import FALLBACK_ORDER, MODEL_CALL_TIMEOUT_MS, OLLAMA_MODELS, PROGRESS_MESSAGES
+from config import DEFAULT_MODE, FALLBACK_ORDER, MODEL_CALL_TIMEOUT_MS, OLLAMA_MODELS, PROGRESS_MESSAGES
 from ollama_service_manager import OllamaError
 
 logger = logging.getLogger("prompt_enhancer")
@@ -64,6 +64,63 @@ def _chat(model_name: str, messages: List[Dict], options: Optional[Dict] = None)
         messages=messages,
         options=opts
     )
+
+def _should_solve(prompt: str) -> bool:
+    text = (prompt or "").lower()
+    cues = [
+        "return only",
+        "output format",
+        "exactly the sample output",
+        "answer key",
+        "final answers",
+    ]
+    return any(cue in text for cue in cues)
+
+def solve_problem(prompt: str, model_name: str) -> str:
+    """Solve a problem and return only the final answer."""
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are a precise solver. Follow the problem instructions and "
+                "return ONLY the final answer in the required format. Do not restate "
+                "the problem and do not add explanations."
+            ),
+        },
+        {
+            "role": "user",
+            "content": prompt,
+        },
+    ]
+    try:
+        response = _chat(model_name, messages, options={"temperature": 0})
+        return response["message"]["content"]
+    except Exception as e:
+        logger.error(f"Error during solve: {e}")
+        raise OllamaError(f"Solve failed: {str(e)}")
+
+def verify_answer(prompt: str, answer: str, model_name: str) -> str:
+    """Verify and correct the answer, returning only the final answer."""
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "Verify the proposed answer against the problem. If incorrect, "
+                "produce the corrected answer. Return ONLY the final answer in the "
+                "required format with no explanation."
+            ),
+        },
+        {
+            "role": "user",
+            "content": f"Problem:\n{prompt}\n\nProposed answer:\n{answer}",
+        },
+    ]
+    try:
+        response = _chat(model_name, messages, options={"temperature": 0})
+        return response["message"]["content"]
+    except Exception as e:
+        logger.error(f"Error during verify: {e}")
+        raise OllamaError(f"Verify failed: {str(e)}")
 
 def analyze_prompt(prompt: str, model_name: str) -> str:
     """Analyze the initial prompt."""
@@ -303,13 +360,34 @@ def _emit_progress(progress_cb: Optional[Callable], phase: str, content: Optiona
         progress_cb(phase, PROGRESS_MESSAGES.get(phase, ""), content)
 
 
-def run_full_pipeline(prompt: str, progress_cb: Optional[Callable] = None) -> Dict[str, str]:
-    """Run the full enhancement pipeline and return stage outputs."""
+def run_full_pipeline(
+    prompt: str,
+    progress_cb: Optional[Callable] = None,
+    mode: Optional[str] = None
+) -> Dict[str, str]:
+    """Run the pipeline and return stage outputs."""
     if not prompt or not prompt.strip():
         raise ValueError("Prompt is empty")
 
+    mode = (mode or DEFAULT_MODE).lower()
+    if mode == "auto" and _should_solve(prompt):
+        mode = "solve"
+
     results: Dict[str, str] = {}
     _emit_progress(progress_cb, "start")
+
+    if mode == "solve":
+        results["solved"] = retry_with_fallback(
+            solve_problem, prompt, OLLAMA_MODELS["comprehensive"]
+        )
+        results["comprehensive"] = retry_with_fallback(
+            verify_answer,
+            prompt,
+            results["solved"],
+            OLLAMA_MODELS.get("presenter", OLLAMA_MODELS["comprehensive"]),
+        )
+        _emit_progress(progress_cb, "complete", results["comprehensive"])
+        return results
 
     results["analysis"] = retry_with_fallback(
         analyze_prompt, prompt, OLLAMA_MODELS["analysis"]
