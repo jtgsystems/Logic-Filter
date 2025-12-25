@@ -1,0 +1,181 @@
+# 🤖 AI Resource Scheduling Example
+
+## Problem Definition
+```python
+scheduling_problem = {
+    'objective': 'Schedule tasks across available servers',
+    'tasks': [
+        {'id': 1, 'load': 0.3, 'priority': 'high', 'deadline': '2h'},
+        {'id': 2, 'load': 0.5, 'priority': 'medium', 'deadline': '4h'},
+        {'id': 3, 'load': 0.2, 'priority': 'low', 'deadline': '8h'}
+    ],
+    'servers': [
+        {'id': 'srv1', 'capacity': 0.8, 'current_load': 0.3},
+        {'id': 'srv2', 'capacity': 1.0, 'current_load': 0.6}
+    ],
+    'constraints': {
+        'max_server_load': 0.9,
+        'priority_requirements': True,
+        'deadline_requirements': True
+    }
+}
+```
+
+## Implementation
+```python
+class ResourceScheduler(ProblemSolver):
+    def decompose_problem(self, problem):
+        # Group tasks by priority
+        priority_groups = self.group_by_priority(problem['tasks'])
+        return [
+            {
+                'tasks': tasks,
+                'available_servers': self.filter_eligible_servers(
+                    problem['servers'],
+                    sum(task['load'] for task in tasks)
+                )
+            }
+            for priority, tasks in priority_groups.items()
+        ]
+
+    def group_by_priority(self, tasks):
+        groups = {'high': [], 'medium': [], 'low': []}
+        for task in tasks:
+            groups[task['priority']].append(task)
+        return groups
+
+    def filter_eligible_servers(self, servers, required_capacity):
+        return [
+            server for server in servers
+            if (server['capacity'] - server['current_load']) >= required_capacity
+        ]
+
+    def generate_novel_solution(self, components):
+        solutions = []
+        for component in components:
+            # Try different scheduling strategies
+            solutions.extend([
+                self.apply_load_balancing(component),
+                self.apply_deadline_optimization(component),
+                self.apply_server_consolidation(component)
+            ])
+        return solutions
+
+    def apply_load_balancing(self, component):
+        tasks = component['tasks']
+        servers = component['available_servers']
+        allocation = {}
+
+        # Sort tasks by load (descending)
+        sorted_tasks = sorted(tasks, key=lambda x: x['load'], reverse=True)
+
+        # Sort servers by available capacity (descending)
+        sorted_servers = sorted(
+            servers,
+            key=lambda x: x['capacity'] - x['current_load'],
+            reverse=True
+        )
+
+        # Allocate tasks to servers
+        for task in sorted_tasks:
+            best_server = None
+            min_load = float('inf')
+
+            for server in sorted_servers:
+                new_load = server['current_load'] + task['load']
+                if new_load <= server['capacity'] and new_load < min_load:
+                    best_server = server
+                    min_load = new_load
+
+            if best_server:
+                if best_server['id'] not in allocation:
+                    allocation[best_server['id']] = []
+                allocation[best_server['id']].append(task['id'])
+                best_server['current_load'] = min_load
+
+        return allocation
+
+    def apply_deadline_optimization(self, component):
+        tasks = sorted(component['tasks'], key=lambda x: x['deadline'])
+        servers = component['available_servers']
+        return self._allocate_by_deadline(tasks, servers)
+
+    def apply_server_consolidation(self, component):
+        tasks = component['tasks']
+        servers = sorted(component['available_servers'],
+                       key=lambda x: x['current_load'],
+                       reverse=True)
+        return self._consolidate_allocation(tasks, servers)
+
+    def validate_solution(self, result, original_problem):
+        # Check server load constraints
+        for server_id, task_ids in result.items():
+            server = next(s for s in original_problem['servers'] if s['id'] == server_id)
+            tasks = [t for t in original_problem['tasks'] if t['id'] in task_ids]
+
+            # Verify server capacity
+            total_load = server['current_load'] + sum(t['load'] for t in tasks)
+            if total_load > server['capacity']:
+                return False
+
+            # Verify priority ordering
+            if original_problem['constraints']['priority_requirements']:
+                if not self.verify_priority_ordering(tasks):
+                    return False
+
+            # Verify deadline feasibility
+            if original_problem['constraints']['deadline_requirements']:
+                if not self.verify_deadline_feasibility(tasks):
+                    return False
+
+        return True
+
+    def verify_priority_ordering(self, tasks):
+        priority_order = {'high': 0, 'medium': 1, 'low': 2}
+        sorted_tasks = sorted(tasks, key=lambda x: priority_order[x['priority']])
+        return tasks == sorted_tasks
+
+    def verify_deadline_feasibility(self, tasks):
+        current_time = 0
+        for task in tasks:
+            deadline = self.parse_deadline(task['deadline'])
+            if current_time + self.estimate_completion_time(task) > deadline:
+                return False
+            current_time += self.estimate_completion_time(task)
+        return True
+```
+
+## Usage Example
+```python
+# Initialize scheduler
+scheduler = ResourceScheduler(
+    knowledge_base=KnowledgeBase(),
+    pattern_matcher=PatternMatcher(),
+    solution_generator=SolutionGenerator()
+)
+
+# Solve scheduling problem
+solution = scheduler.solve_problem(scheduling_problem)
+
+# Example solution format:
+# {
+#     'srv1': [1, 3],  # High priority and low priority tasks
+#     'srv2': [2]      # Medium priority task
+# }
+
+# Validate and implement
+if scheduler.validate_solution(solution, scheduling_problem):
+    result = scheduler.implement_solution(solution)
+    scheduler.update_knowledge_base(scheduling_problem, solution, result)
+```
+
+## Key Features Demonstrated
+1. Priority-based task grouping
+2. Load balancing optimization
+3. Deadline-aware scheduling
+4. Server consolidation strategy
+5. Multi-constraint validation
+6. Resource utilization optimization
+7. Practical error handling
+
+This example shows how to implement a real-world resource scheduling system using the ProblemSolver framework, demonstrating practical application of the problem-solving principles in a concrete scenario.
