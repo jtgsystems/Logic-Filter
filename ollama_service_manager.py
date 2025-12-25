@@ -1,7 +1,9 @@
-import requests
-import time
 import logging
-from settings_manager import SettingsManager
+import time
+
+import requests
+
+from config import REQUEST_TIMEOUT_SEC
 
 logger = logging.getLogger("prompt_enhancer")
 
@@ -26,7 +28,7 @@ class OllamaServiceManager:
         try:
             response = requests.get(
                 "http://localhost:11434/api/health",
-                timeout=self.app_state.settings_manager.get('request_timeout', 2)
+                timeout=self.app_state.settings_manager.get('request_timeout', REQUEST_TIMEOUT_SEC)
             )
             if response.status_code == 200:
                 return True

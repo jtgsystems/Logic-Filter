@@ -4,9 +4,6 @@ import os
 import threading
 from rich.logging import RichHandler
 import customtkinter as ctk
-from typing import Dict, List, Optional
-from flask import Flask
-from api import app as flask_app  # Import the Flask app instance
 from settings_manager import SettingsManager
 from ollama_service_manager import OllamaServiceManager, OllamaError
 from processing_history import ProcessingHistory
@@ -21,13 +18,11 @@ from ui_components import (
     handle_phase_error
 )
 from processing_functions import (
-    analyze_prompt,
-    generate_solutions,
-    vet_and_refine,
-    finalize_prompt,
-    enhance_prompt,
-    comprehensive_review
+    run_full_pipeline,
+    validate_models
 )
+from config import OLLAMA_MODELS
+from ui_components import set_output_widget
 
 # Initialize logging
 logging.basicConfig(
@@ -41,33 +36,6 @@ logger = logging.getLogger("prompt_enhancer")
 # Initialize customtkinter
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
-
-# Constants
-OLLAMA_MODELS = {
-    "analysis": "llama2:latest",      # Initial deep analysis
-    "generation": "llama2:13b",       # Creative solution generation
-    "vetting": "codellama",           # Initial vetting
-    "finalization": "codellama:13b",  # First round improvement
-    "enhancement": "llama2:latest",    # Advanced enhancement
-    "comprehensive": "llama2:latest",  # Initial comprehensive review
-    "presenter": "codellama:13b",     # Final presentation cleanup
-}
-
-PROGRESS_MESSAGES = {
-    "start": "Processing prompt...\n",
-    "analyzing": "Phase 1/6: Analysis\n",
-    "analysis_done": "Analysis complete.\n\n",
-    "generating": "Phase 2/6: Generation\n",
-    "generation_done": "Generation complete.\n\n",
-    "vetting": "Phase 3/6: Vetting\n",
-    "vetting_done": "Vetting complete.\n\n",
-    "finalizing": "Phase 4/6: Finalization\n",
-    "finalize_done": "Finalization complete.\n\n",
-    "enhancing": "Phase 5/6: Enhancement\n",
-    "enhance_done": "Enhancement complete.\n\n",
-    "comprehensive": "Phase 6/6: Review\n",
-    "complete": "Process complete.\n\n",
-}
 
 class ApplicationState:
     """Global application state manager"""
@@ -90,6 +58,7 @@ class ApplicationState:
         self.root = root
         self.settings_manager = SettingsManager()
         self.processing_history = ProcessingHistory()
+        self.processing_history.max_history = self.settings_manager.get("max_history", 50)
         self.ollama_manager = OllamaServiceManager(self)
         self.loading = LoadingIndicator(root)
 
@@ -119,53 +88,77 @@ def process_prompt():
     app_state.is_processing = True
     def run_processing():
         try:
+            def ui_update(text, is_error=False):
+                if app_state.root:
+                    app_state.root.after(0, lambda: update_output(text, is_error))
+
             prompt = app_state.input_text.get("1.0", "end").strip()
             if not prompt:
-                update_output("Error: No prompt entered.", is_error=True)
+                ui_update("Error: No prompt entered.", is_error=True)
                 return
 
-            # Run the enhancement pipeline
-            app_state.loading.start(0)
-            update_output(PROGRESS_MESSAGES["start"])
+            if not app_state.ollama_manager.initialize_ollama():
+                ui_update("Error: Ollama is not ready.", is_error=True)
+                return
 
-            analysis = analyze_prompt(prompt, OLLAMA_MODELS["analysis"])
-            app_state.loading.start(20)
-            update_output(PROGRESS_MESSAGES["analysis_done"] + analysis)
+            unavailable = validate_models()
+            if unavailable:
+                missing = ", ".join([m for _, m in unavailable])
+                ui_update(f"Error: Missing models: {missing}", is_error=True)
+                return
 
-            solutions = generate_solutions(analysis, OLLAMA_MODELS["generation"])
-            app_state.loading.start(40)
-            update_output(PROGRESS_MESSAGES["generation_done"] + solutions)
+            if app_state.root:
+                app_state.root.after(0, lambda: app_state.status_bar.set_status("Processing"))
+                app_state.root.after(0, lambda: app_state.loading.start(0))
 
-            vetted = vet_and_refine(solutions, OLLAMA_MODELS["vetting"])
-            app_state.loading.start(60)
-            update_output(PROGRESS_MESSAGES["vetting_done"] + vetted)
+            output_chunks = []
+            phase_to_progress = {
+                "analysis_done": 20,
+                "generation_done": 40,
+                "vetting_done": 60,
+                "finalize_done": 80,
+                "enhance_done": 90,
+                "complete": 100,
+            }
+            phase_to_model = {
+                "analysis_done": "analysis",
+                "generation_done": "generation",
+                "vetting_done": "vetting",
+                "finalize_done": "finalization",
+                "enhance_done": "enhancement",
+                "complete": "comprehensive",
+            }
 
-            final = finalize_prompt(vetted, prompt, OLLAMA_MODELS["finalization"])
-            app_state.loading.start(80)
-            update_output(PROGRESS_MESSAGES["finalize_done"] + final)
+            def progress_cb(phase, message, content):
+                if message:
+                    output_chunks.append(message.strip())
+                if content:
+                    output_chunks.append(content)
 
-            enhanced = enhance_prompt(final, OLLAMA_MODELS["enhancement"])
-            app_state.loading.start(90)
-            update_output(PROGRESS_MESSAGES["enhance_done"] + enhanced)
+                def _ui_update():
+                    if phase in phase_to_model:
+                        app_state.set_active_model(phase_to_model[phase])
+                    if phase in phase_to_progress:
+                        app_state.loading.start(phase_to_progress[phase])
+                    update_output("\n\n".join([c for c in output_chunks if c]))
 
-            comprehensive = comprehensive_review(
-                prompt, analysis, solutions, vetted,
-                final, enhanced, OLLAMA_MODELS["comprehensive"]
-            )
-            app_state.loading.start(100)
-            update_output(comprehensive)
-            update_output(PROGRESS_MESSAGES["complete"])
+                if app_state.root:
+                    app_state.root.after(0, _ui_update)
+
+            results = run_full_pipeline(prompt, progress_cb=progress_cb)
 
             # Store in history
-            app_state.processing_history.add(prompt, comprehensive)
+            app_state.processing_history.add(prompt, results.get("comprehensive", ""))
 
         except Exception as e:
-            error_msg = handle_phase_error("Processing", e, None, app_state.loading, "")
-            update_output(error_msg, is_error=True)
+            error_msg = handle_phase_error("Processing", e, None, None, "")
+            if app_state.root:
+                app_state.root.after(0, lambda: update_output(error_msg, is_error=True))
         finally:
             app_state.is_processing = False
-            app_state.loading.stop()
-            app_state.status_bar.set_status("Ready")
+            if app_state.root:
+                app_state.root.after(0, app_state.loading.stop)
+                app_state.root.after(0, lambda: app_state.status_bar.set_status("Ready"))
 
     processing_thread = threading.Thread(target=run_processing)
     processing_thread.daemon = True
@@ -185,7 +178,7 @@ def setup_main_window(root):
     app_state.model_indicators = indicators
 
     # Create toolbar
-    toolbar = create_toolbar(main_container)
+    toolbar = create_toolbar(main_container, input_text, output_text)
     toolbar.pack(fill="x", pady=(0, 10))
     app_state.toolbar = toolbar
 
@@ -207,6 +200,7 @@ def setup_main_window(root):
 
     output_text = create_scrolled_text(output_frame, height=200, readonly=True)
     output_text.pack(fill="both", expand=True, pady=(5, 10))
+    set_output_widget(output_text)
 
     # Create process button
     process_btn = ctk.CTkButton(
@@ -235,19 +229,21 @@ def setup_main_window(root):
     root.geometry(f"{width}x{height}+{x}+{y}")
 
     # Create menu
-    app_state.menu_manager = create_menu(root)
+    app_state.menu_manager = create_menu(root, input_text, output_text)
 
 # Create global application state
 app_state = ApplicationState()
 
 def start_flask_app():
     """Start the Flask app in a separate thread."""
+    from api import app as flask_app
     flask_app.run(debug=True, use_reloader=False)
 
 def main():
     """Main entry point of the application."""
     root = tk.Tk()
     app_state.initialize(root)
+    ctk.set_appearance_mode(app_state.settings_manager.get("theme", "dark"))
 
     # Make sure customtkinter's images are in the correct path
     assets_dir = os.path.join(os.path.dirname(__file__), "assets")

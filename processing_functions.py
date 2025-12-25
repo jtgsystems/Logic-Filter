@@ -1,46 +1,69 @@
 import logging
-from typing import Optional, Dict, List
+from typing import Callable, Dict, List, Optional
+
+from config import FALLBACK_ORDER, MODEL_CALL_TIMEOUT_MS, OLLAMA_MODELS, PROGRESS_MESSAGES
 from ollama_service_manager import OllamaError
 
 logger = logging.getLogger("prompt_enhancer")
 
-def retry_with_fallback(func, *args, max_retries=3, **kwargs):
-    """Retry a function with fallback models if the primary model fails"""
+def retry_with_fallback(func, *args, max_retries=2, model_name=None, **kwargs):
+    """Retry a function with fallback models if the primary model fails."""
     last_error = None
-    model_arg_index = -1  # Find the model argument
-    
-    # Find which argument is the model name
-    for i, arg in enumerate(args):
-        if isinstance(arg, str) and arg in OLLAMA_MODELS.values():
-            model_arg_index = i
-            break
-    
-    if model_arg_index == -1:
+    model_arg_index = -1
+
+    if model_name is None:
+        for i, arg in enumerate(args):
+            if isinstance(arg, str) and arg in OLLAMA_MODELS.values():
+                model_arg_index = i
+                model_name = arg
+                break
+    else:
+        for i, arg in enumerate(args):
+            if isinstance(arg, str) and arg == model_name:
+                model_arg_index = i
+                break
+
+    if model_name is None or model_arg_index == -1:
         raise ValueError("No model argument found")
-        
-    current_model = args[model_arg_index]
-    args = list(args)  # Convert to list for modification
-    
-    # Try primary model first
+
+    args = list(args)
+
     for _ in range(max_retries):
         try:
             return func(*args, **kwargs)
         except Exception as e:
             last_error = e
-            logger.warning(f"Error with model {current_model}: {e}")
-    
-    # Try fallback models
-    if current_model in FALLBACK_ORDER:
-        for fallback_model in FALLBACK_ORDER[current_model]:
-            args[model_arg_index] = fallback_model
-            try:
-                logger.info(f"Trying fallback model: {fallback_model}")
-                return func(*args, **kwargs)
-            except Exception as e:
-                last_error = e
-                logger.warning(f"Error with fallback model {fallback_model}: {e}")
-    
+            logger.warning(f"Error with model {model_name}: {e}")
+
+    for fallback_model in FALLBACK_ORDER.get(model_name, []):
+        args[model_arg_index] = fallback_model
+        try:
+            logger.info(f"Trying fallback model: {fallback_model}")
+            return func(*args, **kwargs)
+        except Exception as e:
+            last_error = e
+            logger.warning(f"Error with fallback model {fallback_model}: {e}")
+
     raise last_error or Exception("All models failed")
+
+
+def _chat(model_name: str, messages: List[Dict], options: Optional[Dict] = None) -> Dict:
+    from main import app_state
+    if app_state.settings_manager is None:
+        from settings_manager import SettingsManager
+        app_state.settings_manager = SettingsManager()
+    if app_state.ollama_manager is None:
+        from ollama_service_manager import OllamaServiceManager
+        app_state.ollama_manager = OllamaServiceManager(app_state)
+
+    opts = {"timeout": MODEL_CALL_TIMEOUT_MS}
+    if options:
+        opts.update(options)
+    return app_state.ollama_manager.chat(
+        model=model_name,
+        messages=messages,
+        options=opts
+    )
 
 def analyze_prompt(prompt: str, model_name: str) -> str:
     """Analyze the initial prompt."""
@@ -61,11 +84,7 @@ def analyze_prompt(prompt: str, model_name: str) -> str:
         }
     ]
     try:
-        from main import app_state
-        response = app_state.ollama_manager.chat(
-            model=model_name,
-            messages=messages
-        )
+        response = _chat(model_name, messages)
         return response["message"]["content"]
     except Exception as e:
         logger.error(f"Error during analysis: {e}")
@@ -90,11 +109,7 @@ def generate_solutions(analysis: str, model_name: str) -> str:
         }
     ]
     try:
-        from main import app_state
-        response = app_state.ollama_manager.chat(
-            model=model_name,
-            messages=messages
-        )
+        response = _chat(model_name, messages)
         return response["message"]["content"]
     except Exception as e:
         logger.error(f"Error during solution generation: {e}")
@@ -118,11 +133,7 @@ def vet_and_refine(improvements: str, model_name: str) -> str:
         }
     ]
     try:
-        from main import app_state
-        response = app_state.ollama_manager.chat(
-            model=model_name,
-            messages=messages
-        )
+        response = _chat(model_name, messages)
         return response["message"]["content"]
     except Exception as e:
         logger.error(f"Error during vetting: {e}")
@@ -147,11 +158,7 @@ def finalize_prompt(vetting_report: str, original_prompt: str, model_name: str) 
         }
     ]
     try:
-        from main import app_state
-        response = app_state.ollama_manager.chat(
-            model=model_name,
-            messages=messages
-        )
+        response = _chat(model_name, messages)
         return response["message"]["content"]
     except Exception as e:
         logger.error(f"Error during finalization: {e}")
@@ -176,11 +183,7 @@ def enhance_prompt(final_prompt: str, model_name: str) -> str:
         }
     ]
     try:
-        from main import app_state
-        response = app_state.ollama_manager.chat(
-            model=model_name,
-            messages=messages
-        )
+        response = _chat(model_name, messages)
         return response["message"]["content"]
     except Exception as e:
         logger.error(f"Error during enhancement: {e}")
@@ -197,8 +200,6 @@ def comprehensive_review(
 ) -> str:
     """Create final version and ensure clean presentation."""
     try:
-        from main import app_state
-        
         # First, use model for comprehensive review
         messages = [
             {
@@ -217,10 +218,7 @@ def comprehensive_review(
                 )
             }
         ]
-        response = app_state.ollama_manager.chat(
-            model=model_name,
-            messages=messages
-        )
+        response = _chat(model_name, messages)
         improved = response["message"]["content"]
 
         # Then use presenter model for final cleanup
@@ -242,10 +240,8 @@ def comprehensive_review(
             }
         ]
         
-        response = app_state.ollama_manager.chat(
-            model=app_state.OLLAMA_MODELS["presenter"],
-            messages=messages
-        )
+        presenter_model = OLLAMA_MODELS.get("presenter", model_name)
+        response = _chat(presenter_model, messages)
         return response["message"]["content"]
     except Exception as e:
         logger.error(f"Error during comprehensive review: {e}")
@@ -257,13 +253,8 @@ def verify_model_availability(model_name: str) -> bool:
         from main import app_state
         if not app_state.ollama_manager.ollama_ready:
             return False
-        
-        # Try to ping the model with a timeout
-        app_state.ollama_manager.chat(
-            model=model_name,
-            messages=[{"role": "user", "content": "test"}],
-            options={"timeout": 5000}
-        )
+
+        _chat(model_name, [{"role": "user", "content": "test"}], options={"timeout": 5000})
         return True
     except Exception as e:
         error_str = str(e).lower()
@@ -277,7 +268,13 @@ def verify_model_availability(model_name: str) -> bool:
 
 def validate_models() -> List[tuple]:
     """Validate all required models are available."""
-    from main import app_state, OLLAMA_MODELS
+    from main import app_state
+    if app_state.settings_manager is None:
+        from settings_manager import SettingsManager
+        app_state.settings_manager = SettingsManager()
+    if app_state.ollama_manager is None:
+        from ollama_service_manager import OllamaServiceManager
+        app_state.ollama_manager = OllamaServiceManager(app_state)
     
     if not app_state.ollama_manager.ollama_ready:
         return []
@@ -299,3 +296,56 @@ def validate_models() -> List[tuple]:
         raise OllamaError(connection_error)
         
     return unavailable_models
+
+
+def _emit_progress(progress_cb: Optional[Callable], phase: str, content: Optional[str] = None) -> None:
+    if progress_cb:
+        progress_cb(phase, PROGRESS_MESSAGES.get(phase, ""), content)
+
+
+def run_full_pipeline(prompt: str, progress_cb: Optional[Callable] = None) -> Dict[str, str]:
+    """Run the full enhancement pipeline and return stage outputs."""
+    if not prompt or not prompt.strip():
+        raise ValueError("Prompt is empty")
+
+    results: Dict[str, str] = {}
+    _emit_progress(progress_cb, "start")
+
+    results["analysis"] = retry_with_fallback(
+        analyze_prompt, prompt, OLLAMA_MODELS["analysis"]
+    )
+    _emit_progress(progress_cb, "analysis_done", results["analysis"])
+
+    results["generation"] = retry_with_fallback(
+        generate_solutions, results["analysis"], OLLAMA_MODELS["generation"]
+    )
+    _emit_progress(progress_cb, "generation_done", results["generation"])
+
+    results["vetting"] = retry_with_fallback(
+        vet_and_refine, results["generation"], OLLAMA_MODELS["vetting"]
+    )
+    _emit_progress(progress_cb, "vetting_done", results["vetting"])
+
+    results["final"] = retry_with_fallback(
+        finalize_prompt, results["vetting"], prompt, OLLAMA_MODELS["finalization"]
+    )
+    _emit_progress(progress_cb, "finalize_done", results["final"])
+
+    results["enhanced"] = retry_with_fallback(
+        enhance_prompt, results["final"], OLLAMA_MODELS["enhancement"]
+    )
+    _emit_progress(progress_cb, "enhance_done", results["enhanced"])
+
+    results["comprehensive"] = retry_with_fallback(
+        comprehensive_review,
+        prompt,
+        results["analysis"],
+        results["generation"],
+        results["vetting"],
+        results["final"],
+        results["enhanced"],
+        OLLAMA_MODELS["comprehensive"],
+    )
+    _emit_progress(progress_cb, "complete", results["comprehensive"])
+
+    return results

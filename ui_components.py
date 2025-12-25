@@ -9,6 +9,23 @@ from typing import Optional, Union, Tuple
 
 logger = logging.getLogger("prompt_enhancer")
 
+
+def set_output_widget(widget):
+    """Bind the global output widget for update_output()."""
+    update_output.output_widget = widget
+
+
+def _set_text(widget, text: str):
+    widget.configure(state="normal")
+    widget.delete("1.0", "end")
+    widget.insert("end", text)
+    widget.configure(state="disabled")
+
+
+def clear_input(input_text=None):
+    if input_text:
+        input_text.delete("1.0", "end")
+
 class StatusBar(ctk.CTkFrame):
     """Enhanced status bar with multiple indicators"""
     def __init__(self, parent):
@@ -62,6 +79,12 @@ class StatusBar(ctk.CTkFrame):
         new_theme = "light" if current == "dark" else "dark"
         ctk.set_appearance_mode(new_theme)
         self.theme_btn.configure(text=f"Theme: {new_theme.capitalize()}")
+        try:
+            from main import app_state
+            if app_state and app_state.settings_manager:
+                app_state.settings_manager.set("theme", new_theme)
+        except Exception:
+            pass
         
     def _schedule_memory_update(self):
         """Schedule the next memory update with throttling"""
@@ -167,45 +190,61 @@ def create_scrolled_text(root, height=10, width=50, readonly=False):
     return text
 
 def create_toolbar(root, input_text=None, output_text=None):
-    """Create and return a toolbar"""
+    """Create and return a toolbar."""
     toolbar = ctk.CTkFrame(root)
-    
-    # Create buttons with standard actions
+
+    def _apply_history(entry):
+        if not entry:
+            return
+        if input_text:
+            input_text.delete("1.0", "end")
+            input_text.insert("end", entry.get("input", ""))
+        if output_text:
+            _set_text(output_text, entry.get("output", ""))
+
+    def _undo():
+        from main import app_state
+        entry = app_state.processing_history.undo() if app_state.processing_history else None
+        _apply_history(entry)
+
+    def _redo():
+        from main import app_state
+        entry = app_state.processing_history.redo() if app_state.processing_history else None
+        _apply_history(entry)
+
     buttons = [
-        ("New", lambda: clear_output(output_text)),
+        ("New", lambda: clear_input(input_text)),
+        ("Clear Output", lambda: clear_output(output_text)),
+        ("Undo", _undo),
+        ("Redo", _redo),
         ("Copy", lambda: copy_to_clipboard(output_text)),
         ("Save", lambda: save_output(output_text)),
-        ("Export History", lambda: export_history())
+        ("Export History", export_history),
     ]
-    
+
     for text, command in buttons:
-        btn = ctk.CTkButton(
-            toolbar,
-            text=text,
-            command=command,
-            width=100
-        )
+        btn = ctk.CTkButton(toolbar, text=text, command=command, width=110)
         btn.pack(side="left", padx=5)
-        
+
     return toolbar
 
-def create_menu(root):
-    """Create and return the application menu"""
+def create_menu(root, input_text=None, output_text=None):
+    """Create and return the application menu."""
     menu = tk.Menu(root)
     root.config(menu=menu)
     
     file_menu = tk.Menu(menu, tearoff=0)
     menu.add_cascade(label="File", menu=file_menu)
-    file_menu.add_command(label="New", command=lambda: clear_output())
-    file_menu.add_command(label="Save", command=lambda: save_output())
-    file_menu.add_command(label="Export History", command=lambda: export_history())
+    file_menu.add_command(label="New", command=lambda: clear_input(input_text))
+    file_menu.add_command(label="Save", command=lambda: save_output(output_text))
+    file_menu.add_command(label="Export History", command=export_history)
     file_menu.add_separator()
     file_menu.add_command(label="Exit", command=root.quit)
     
     edit_menu = tk.Menu(menu, tearoff=0)
     menu.add_cascade(label="Edit", menu=edit_menu)
-    edit_menu.add_command(label="Copy", command=lambda: copy_to_clipboard())
-    edit_menu.add_command(label="Clear Output", command=lambda: clear_output())
+    edit_menu.add_command(label="Copy", command=lambda: copy_to_clipboard(output_text))
+    edit_menu.add_command(label="Clear Output", command=lambda: clear_output(output_text))
     
     return menu
 
@@ -232,16 +271,12 @@ def update_output(text, is_error=False):
         return
         
     try:
-        update_output.output_widget.configure(state="normal")
-        update_output.output_widget.delete("1.0", "end")
         text = sanitize_output(text)
-        update_output.output_widget.insert("end", text)
+        _set_text(update_output.output_widget, text)
             
         if is_error:
             update_output.output_widget.tag_add("error", "1.0", "end")
             update_output.output_widget.tag_configure("error", foreground="red")
-            
-        update_output.output_widget.configure(state="disabled")
         update_output.output_widget.see("end")
         
     except Exception as e:
@@ -353,7 +388,7 @@ def sanitize_output(text):
     
     # Clean meta instructions
     if "PRESENT TO USER:" in text:
-        text = text.split("PRESENT TO USER:", 1)[1]
+        text = text.replace("PRESENT TO USER:", "")
         
     # Clean up whitespace
     lines = [line.strip() for line in text.splitlines() if line.strip()]

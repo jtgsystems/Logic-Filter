@@ -1,13 +1,5 @@
 from flask import Flask, request, jsonify
-from processing_functions import (
-    analyze_prompt,
-    generate_solutions,
-    vet_and_refine,
-    finalize_prompt,
-    enhance_prompt,
-    comprehensive_review
-)
-from main import OLLAMA_MODELS
+from processing_functions import run_full_pipeline
 import logging
 
 app = Flask(__name__)
@@ -19,21 +11,16 @@ logger = logging.getLogger(__name__)
 
 @app.route('/process_prompt', methods=['POST'])
 def process_prompt():
-    data = request.get_json()
-    prompt = data['prompt']
+    data = request.get_json(silent=True) or {}
+    prompt = (data.get('prompt') or "").strip()
+    if not prompt:
+        return jsonify({'error': 'prompt is required'}), 400
 
     logger.info(f"Received prompt: {prompt}")
 
     try:
-        analysis = analyze_prompt(prompt, OLLAMA_MODELS["analysis"])
-        solutions = generate_solutions(analysis, OLLAMA_MODELS["generation"])
-        vetted = vet_and_refine(solutions, OLLAMA_MODELS["vetting"])
-        final = finalize_prompt(vetted, prompt, OLLAMA_MODELS["finalization"])
-        enhanced = enhance_prompt(final, OLLAMA_MODELS["enhancement"])
-        comprehensive = comprehensive_review(
-            prompt, analysis, solutions, vetted,
-            final, enhanced, OLLAMA_MODELS["comprehensive"]
-        )
+        results = run_full_pipeline(prompt)
+        comprehensive = results.get("comprehensive", "")
 
         logger.info("Prompt processed successfully")
         return jsonify({'output': comprehensive})

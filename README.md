@@ -66,6 +66,14 @@ multi-model approach.
    - Vetting report
    - Final improved version
 
+## Tests
+
+Mocked pipeline smoke test (no Ollama required):
+
+```
+python3 -m unittest -v tests.test_pipeline
+```
+
 ## How It Works
 
 The application uses a four-phase process with specialized models:
