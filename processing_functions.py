@@ -1,12 +1,12 @@
 import logging
-from typing import Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from config import DEFAULT_MODE, FALLBACK_ORDER, MODEL_CALL_TIMEOUT_MS, OLLAMA_MODELS, PROGRESS_MESSAGES
 from ollama_service_manager import OllamaError
 
 logger = logging.getLogger("prompt_enhancer")
 
-def retry_with_fallback(func, *args, max_retries=2, model_name=None, **kwargs):
+def retry_with_fallback(func: Callable, *args: Any, max_retries: int = 2, model_name: Optional[str] = None, **kwargs: Any) -> Any:
     """Retry a function with fallback models if the primary model fails."""
     last_error = None
     model_arg_index = -1
@@ -26,26 +26,43 @@ def retry_with_fallback(func, *args, max_retries=2, model_name=None, **kwargs):
     if model_name is None or model_arg_index == -1:
         raise ValueError("No model argument found")
 
-    args = list(args)
+    args_list = list(args)
 
     for _ in range(max_retries):
         try:
-            return func(*args, **kwargs)
+            return func(*args_list, **kwargs)
         except Exception as e:
             last_error = e
             logger.warning(f"Error with model {model_name}: {e}")
 
     for fallback_model in FALLBACK_ORDER.get(model_name, []):
-        args[model_arg_index] = fallback_model
+        args_list[model_arg_index] = fallback_model
         try:
             logger.info(f"Trying fallback model: {fallback_model}")
-            return func(*args, **kwargs)
+            return func(*args_list, **kwargs)
         except Exception as e:
             last_error = e
             logger.warning(f"Error with fallback model {fallback_model}: {e}")
 
     raise last_error or Exception("All models failed")
 
+def generate_with_reflection(model_name: str, base_messages: List[Dict], options: Optional[Dict] = None) -> str:
+    """Generate with self-reflection to boost weak LLMs."""
+    response = _chat(model_name, base_messages, options)
+    content = response["message"]["content"]
+
+    critique_messages = base_messages + [
+        {"role": "assistant", "content": content},
+        {"role": "system", "content": "Critique the previous response for completeness, accuracy, clarity, structure, relevance. Identify weaknesses and suggest improvements."},
+        {"role": "user", "content": "Provide critique."}
+    ]
+    critique = _chat(model_name, critique_messages, options)["message"]["content"]
+
+    improve_messages = base_messages + [
+        {"role": "assistant", "content": content},
+        {"role": "user", "content": f"Improve using this critique: {critique}"}
+    ]
+    return _chat(model_name, improve_messages, options)["message"]["content"]
 
 def _chat(model_name: str, messages: List[Dict], options: Optional[Dict] = None) -> Dict:
     from main import app_state
@@ -389,6 +406,105 @@ def run_full_pipeline(
         _emit_progress(progress_cb, "complete", results["comprehensive"])
         return results
 
+    if mode == "boost":
+        """Boost mode: Use reflection to increase intelligence of weak LLMs"""
+        boost_model = "mistral:latest"
+
+        def safe_generate(prompt_text: str) -> str:
+            msgs = [{"role": "user", "content": prompt_text}]
+            try:
+                return generate_with_reflection(boost_model, msgs)
+            except Exception as e:
+                logger.warning(f"Boost reflection failed: {e}")
+                return _chat(boost_model, msgs)["message"]["content"]
+
+        # Analysis stage
+        analysis_text = f"""Analyze this prompt: '{prompt}'
+
+Focus on:
+1. Core requirements and goals
+2. Key components needed
+3. Specific constraints or parameters
+4. Expected output format
+5. Quality criteria
+
+Provide a clear, focused analysis that will help in improving this exact prompt."""
+        results["analysis"] = safe_generate(analysis_text)
+        _emit_progress(progress_cb, "analysis_done", results["analysis"])
+
+        # Generation stage
+        gen_text = f"""Based on this analysis: '{results["analysis"]}'
+
+Generate specific improvements that:
+1. Address identified issues
+2. Enhance clarity and specificity
+3. Add necessary structure
+4. Maintain focus on core goals
+5. Consider all quality criteria
+
+Important: Generate practical, focused improvements that directly enhance the prompt."""
+        results["generation"] = safe_generate(gen_text)
+        _emit_progress(progress_cb, "generation_done", results["generation"])
+
+        # Vetting stage
+        vet_text = f"""Review these suggested improvements: '{results["generation"]}'
+
+Evaluate how well they enhance the original prompt:
+1. Do they address core requirements?
+2. Are they clear and specific?
+3. Do they maintain focus on the task?
+4. Are they practical and implementable?
+
+Focus on validating improvements that directly enhance the original prompt."""
+        results["vetting"] = safe_generate(vet_text)
+        _emit_progress(progress_cb, "vetting_done", results["vetting"])
+
+        # Finalize stage
+        final_text = f"""Original Prompt: {prompt}
+Validated Improvements: {results["vetting"]}
+
+Create an improved version that:
+1. Maintains the original goal
+2. Incorporates validated improvements
+3. Uses clear, specific language
+4. Adds necessary structure
+5. Includes any required constraints
+
+Stay focused on the original task."""
+        results["final"] = safe_generate(final_text)
+        _emit_progress(progress_cb, "finalize_done", results["final"])
+
+        # Enhance stage
+        enhance_text = f"""Polish and refine this prompt:
+
+{results["final"]}
+
+Focus on:
+1. Making instructions crystal clear
+2. Adding any missing details
+3. Improving structure
+4. Ensuring completeness
+5. Maintaining focus
+
+Stay focused on improving THIS prompt."""
+        results["enhanced"] = safe_generate(enhance_text)
+        _emit_progress(progress_cb, "enhance_done", results["enhanced"])
+
+        # Comprehensive review
+        comp_text = f"""Review all versions and create refined prompt:
+Original: {prompt}
+Analysis: {results["analysis"]}
+Generation: {results["generation"]}
+Vetting: {results["vetting"]}
+Final: {results["final"]}
+Enhanced: {results["enhanced"]}
+
+Combine best elements for maximum clarity and effectiveness."""
+        results["comprehensive"] = safe_generate(comp_text)
+        _emit_progress(progress_cb, "complete", results["comprehensive"])
+        return results
+
+    # Original pipeline
     results["analysis"] = retry_with_fallback(
         analyze_prompt, prompt, OLLAMA_MODELS["analysis"]
     )
