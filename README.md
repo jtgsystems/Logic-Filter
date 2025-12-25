@@ -74,6 +74,15 @@ Mocked pipeline smoke test (no Ollama required):
 python3 -m unittest -v tests.test_pipeline
 ```
 
+Full test run in venv:
+
+```
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -r requirements.txt
+python -m unittest -v
+```
+
 ## How It Works
 
 The application uses a four-phase process with specialized models:

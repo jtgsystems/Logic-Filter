@@ -3,3 +3,4 @@ customtkinter
 rich
 psutil
 pytest
+requests
