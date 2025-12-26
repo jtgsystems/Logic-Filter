@@ -75,7 +75,7 @@ api.py (Flask Server)
 
 **Python Frameworks:**
 - **customtkinter** - Modern Tkinter UI framework with native dark mode
-- **Flask** - Lightweight web framework for REST API
+- **Flask** (≥3.1.2) - Lightweight web framework for REST API
 - **Rich** - Terminal logging and formatting
 - **psutil** - System resource monitoring
 
